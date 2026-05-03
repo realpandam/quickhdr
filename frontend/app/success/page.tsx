@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import { API_URL } from '../lib/config';
 
-export default function SuccessPage() {
+function SuccessContent() {
   const searchParams = useSearchParams();
   const image_id = searchParams.get('image_id');
   const session_id = searchParams.get('session_id');
@@ -93,7 +93,7 @@ export default function SuccessPage() {
             }}>
               Vaše fotografie je připravena ke stažení v plném rozlišení.
             </p>
-            
+
             <a
               href={downloadUrl}
               download
@@ -128,5 +128,17 @@ export default function SuccessPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function SuccessPage() {
+  return (
+    <Suspense fallback={
+      <main style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Načítám...</p>
+      </main>
+    }>
+      <SuccessContent />
+    </Suspense>
   );
 }
