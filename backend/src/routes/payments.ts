@@ -1,117 +1,136 @@
 import { Request, Response, Router } from 'express';
 import { Resend } from 'resend';
-import Stripe from 'stripe';
 import { supabase } from '../lib/supabase';
+import { createPayment, getPaymentStatus } from '../services/gopay.service';
 
 console.log('Resend API key:', process.env.RESEND_API_KEY?.substring(0, 10) + '...');
 
 const router = Router();
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-    apiVersion: '2026-03-25.dahlia' as any,
-});
-
-const PRICE_CZK = 5900;
-
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
+const PRICE_CZK = 59; // GoPay pracuje v celých korunách (haléře řeší service)
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://quickhdr.cz';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://quickhdr-production.up.railway.app';
+
+// ─────────────────────────────────────────────
+// POST /api/payments/create-checkout
+// Nahrazuje Stripe /create-checkout
+// ─────────────────────────────────────────────
 router.post('/create-checkout', async (req: Request, res: Response) => {
     try {
-        const { image_id, filename, user_id } = req.body;
+        const { image_id, filename, user_id, email, firstName, lastName } = req.body;
 
         if (!image_id) {
             res.status(400).json({ error: 'Chybí image_id' });
             return;
         }
 
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'czk',
-                        product_data: {
-                            name: `AI Retušování — ${filename ?? 'fotografie'}`,
-                            description: 'Profesionální vylepšení fotografie pomocí AI',
-                        },
-                        unit_amount: PRICE_CZK,
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: 'payment',
-            success_url: `${process.env.FRONTEND_URL}/success?image_id=${image_id}&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${process.env.FRONTEND_URL}/#editor`,
-            metadata: {
-                image_id,
-                filename: filename ?? '',
-                user_id: user_id ?? '',
-            },
+        if (!email) {
+            res.status(400).json({ error: 'Chybí email' });
+            return;
+        }
+
+        const orderId = `ORDER-${image_id}-${Date.now()}`;
+
+        // Vytvoř pending záznam v Supabase
+        await supabase.from('orders').upsert({
+            image_id,
+            filename: filename ?? '',
+            stripe_payment_status: 'pending', // zachováváme název sloupce pro kompatibilitu
+            amount_czk: PRICE_CZK,
+            user_id: user_id || null,
+            gopay_order_id: orderId,
+            email: email,
         });
 
-        res.json({ url: session.url });
+        const payment = await createPayment({
+            orderId,
+            amount: PRICE_CZK,
+            currency: 'CZK',
+            email,
+            firstName: firstName || '',
+            lastName: lastName || '',
+            description: `AI Retušování — ${filename ?? 'fotografie'}`,
+            returnUrl: `${FRONTEND_URL}/success?image_id=${image_id}`,
+            notifyUrl: `${BACKEND_URL}/api/payments/notify`,
+        });
+
+        // Ulož GoPay payment ID k objednávce
+        await supabase
+            .from('orders')
+            .update({ gopay_payment_id: String(payment.id) })
+            .eq('gopay_order_id', orderId);
+
+        // Vrátí { url } — stejný interface jako Stripe checkout session
+        res.json({ url: payment.gw_url });
     } catch (error) {
-        console.error('Chyba při vytváření checkout session:', error);
+        console.error('Chyba při vytváření GoPay platby:', error);
         res.status(500).json({ error: 'Nepodařilo se vytvořit platbu' });
     }
 });
 
-router.post('/webhook', async (req: Request, res: Response) => {
-    const sig = req.headers['stripe-signature'];
+// ─────────────────────────────────────────────
+// POST /api/payments/notify
+// GoPay webhook — nahrazuje Stripe /webhook
+// ─────────────────────────────────────────────
+router.post('/notify', async (req: Request, res: Response) => {
+    const paymentId = (req.query.id ?? req.body?.id) as string;
 
-    if (!sig) {
-        res.status(400).json({ error: 'Chybí stripe-signature' });
+    if (!paymentId) {
+        res.status(400).send('Missing payment id');
         return;
     }
-
-    let event: ReturnType<typeof stripe.webhooks.constructEvent>;
 
     try {
-        event = stripe.webhooks.constructEvent(
-            req.body,
-            sig,
-            process.env.STRIPE_WEBHOOK_SECRET!
-        );
-    } catch (error) {
-        console.error('Webhook signature verification failed:', error);
-        res.status(400).json({ error: 'Neplatný webhook' });
-        return;
-    }
+        const payment = await getPaymentStatus(paymentId);
+        console.log(`GoPay notify: paymentId=${paymentId} state=${payment.state}`);
 
-    // V webhook handleru po úspěšné platbě:
-    if (event.type === 'checkout.session.completed') {
-        const session = event.data.object as any;
-        const image_id = session.metadata?.image_id;
-        const user_id = session.metadata?.user_id;
-        const filename = session.metadata?.filename;
+        if (payment.state !== 'PAID') {
+            res.status(200).send('OK');
+            return;
+        }
 
-        // Smaž pending záznam pro tuto fotku
+        // Načti objednávku z DB podle gopay_payment_id
+        const { data: order } = await supabase
+            .from('orders')
+            .select('*')
+            .eq('gopay_payment_id', paymentId)
+            .single();
+
+        if (!order) {
+            console.error('Objednávka nenalezena pro paymentId:', paymentId);
+            res.status(200).send('OK');
+            return;
+        }
+
+        const { image_id, filename, user_id, gopay_order_id } = order;
+
+        // Smaž pending záznamy pro tuto fotku
         await supabase
             .from('orders')
             .delete()
             .eq('image_id', image_id)
             .eq('stripe_payment_status', 'pending');
 
-        console.log('Webhook metadata:', { image_id, user_id, session_id: session.id });
-
-        // Ulož zaplacený záznam
+        // Ulož zaplacený záznam — stejná struktura jako Stripe verze
         const { error } = await supabase.from('orders').upsert({
-            stripe_session_id: session.id,
+            gopay_payment_id: paymentId,
+            gopay_order_id,
             image_id,
             filename,
             stripe_payment_status: 'paid',
-            amount_czk: Math.round((session.amount_total ?? 5900) / 100),
+            amount_czk: Math.round(payment.amount / 100),
             user_id: user_id || null,
         });
 
         console.log('Supabase upsert error:', error);
 
-        // Odešli email notifikaci
-        const customerEmail = session.customer_details?.email;
+        // Email notifikace — stejná šablona jako Stripe verze
+        const customerEmail = order.email;
         if (customerEmail) {
             try {
                 await resend.emails.send({
-                    from: process.env.FROM_EMAIL ?? 'noreply@filipzemek.cz',
+                    from: process.env.FROM_EMAIL ?? 'noreply@quickhdr.cz',
                     to: customerEmail,
                     subject: 'Vaše fotografie je připravena ke stažení',
                     html: `
@@ -124,18 +143,15 @@ router.post('/webhook', async (req: Request, res: Response) => {
           <body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
             <div style="max-width:560px;margin:0 auto;padding:48px 24px;">
               
-              <!-- Logo -->
               <p style="font-size:14px;font-weight:600;color:#ffffff;margin:0 0 40px;">
-                Filip Zemek
+                QuickHDR
                 <span style="font-weight:300;color:#666;margin-left:6px;">AI Retušování</span>
               </p>
 
-              <!-- Ikona -->
               <div style="width:48px;height:48px;border-radius:50%;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);display:flex;align-items:center;justify-content:center;margin-bottom:24px;">
                 <span style="font-size:20px;">✓</span>
               </div>
 
-              <!-- Nadpis -->
               <h1 style="font-size:24px;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
                 Vaše fotografie je připravena
               </h1>
@@ -145,13 +161,11 @@ router.post('/webhook', async (req: Request, res: Response) => {
                 je připravena ke stažení v plném rozlišení.
               </p>
 
-              <!-- Tlačítko -->
-              <a href="${process.env.FRONTEND_URL}/dashboard" 
+              <a href="${FRONTEND_URL}/dashboard" 
                  style="display:inline-block;background:#f59e0b;color:#000;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;text-decoration:none;margin-bottom:32px;">
                 Přejít do Moje fotografie →
               </a>
 
-              <!-- Info -->
               <div style="border:1px solid #222;border-radius:8px;padding:20px;margin-bottom:32px;">
                 <p style="font-size:13px;color:#666;margin:0 0 8px;">
                   <strong style="color:#888;">Soubor:</strong> ${filename || image_id}
@@ -160,16 +174,13 @@ router.post('/webhook', async (req: Request, res: Response) => {
                   <strong style="color:#888;">Dostupné po dobu:</strong> 30 dní
                 </p>
                 <p style="font-size:13px;color:#666;margin:0;">
-                  <strong style="color:#888;">Podpora:</strong> fotograf@filipzemek.cz
+                  <strong style="color:#888;">Podpora:</strong> podpora@quickhdr.cz
                 </p>
               </div>
 
-              <!-- Footer -->
               <p style="font-size:12px;color:#444;margin:0;line-height:1.6;">
-                © ${new Date().getFullYear()} Filip Zemek. Všechna práva vyhrazena.<br>
-                IČO: 23584203 · Drnovec 1, 471 54 Cvikov
+                © ${new Date().getFullYear()} QuickHDR. Všechna práva vyhrazena.
               </p>
-
             </div>
           </body>
           </html>
@@ -180,20 +191,28 @@ router.post('/webhook', async (req: Request, res: Response) => {
                 console.error('Chyba při odesílání emailu:', emailError);
             }
         }
-    }
 
-    res.json({ received: true });
+        res.status(200).send('OK');
+    } catch (error) {
+        console.error('GoPay notify error:', error);
+        res.status(500).send('Error');
+    }
 });
 
-router.get('/verify/:sessionId', async (req: Request, res: Response) => {
+// ─────────────────────────────────────────────
+// GET /api/payments/verify/:paymentId
+// Nahrazuje Stripe /verify/:sessionId
+// Frontend volá po návratu z GoPay brány
+// ─────────────────────────────────────────────
+router.get('/verify/:paymentId', async (req: Request, res: Response) => {
     try {
-        const { sessionId } = req.params;
+        const { paymentId } = req.params;
 
         // Nejdřív zkontroluj databázi
         const { data: order } = await supabase
             .from('orders')
             .select('*')
-            .eq('stripe_session_id', sessionId)
+            .eq('gopay_payment_id', paymentId)
             .single();
 
         if (order?.stripe_payment_status === 'paid') {
@@ -201,16 +220,21 @@ router.get('/verify/:sessionId', async (req: Request, res: Response) => {
             return;
         }
 
-        // Fallback — ověř přímo u Stripe
-        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        // Fallback — ověř přímo u GoPay
+        const payment = await getPaymentStatus(paymentId);
 
-        if (session.payment_status !== 'paid') {
+        if (payment.state !== 'PAID') {
             res.status(402).json({ error: 'Platba nebyla dokončena' });
             return;
         }
 
-        const image_id = session.metadata?.image_id;
-        res.json({ image_id, paid: true });
+        const { data: orderByGopay } = await supabase
+            .from('orders')
+            .select('image_id')
+            .eq('gopay_payment_id', paymentId)
+            .single();
+
+        res.json({ image_id: orderByGopay?.image_id, paid: true });
     } catch (error) {
         console.error('Chyba při ověření platby:', error);
         res.status(500).json({ error: 'Nepodařilo se ověřit platbu' });

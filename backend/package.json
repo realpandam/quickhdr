@@ -15,14 +15,13 @@
   "type": "commonjs",
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3",
-    "axios": "^1.15.0",
+    "axios": "^1.16.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "express": "^4.21.2",
     "multer": "^2.1.1",
     "resend": "^6.12.2",
-    "sharp": "^0.34.5",
-    "stripe": "^22.0.2"
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
