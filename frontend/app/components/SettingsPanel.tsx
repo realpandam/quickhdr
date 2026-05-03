@@ -1,0 +1,189 @@
+'use client';
+
+interface Settings {
+  enhance_type: 'warm' | 'neutral' | 'modern';
+  sky_replacement: boolean;
+  cloud_type: 'CLEAR' | 'LOW_CLOUD' | 'HIGH_CLOUD';
+  vertical_correction: boolean;
+  lens_correction: boolean;
+  window_pull_type: 'NONE' | 'ONLY_WINDOWS' | 'WINDOWS_WITH_SKIES';
+  upscale: boolean;
+  privacy: boolean;
+  hdr_mode: boolean;
+  hdr_brackets: 'auto' | 3 | 5 | 7;
+}
+
+interface Props {
+  settings: Settings;
+  onChange: (s: Settings) => void;
+  disabled?: boolean;
+}
+
+function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; label: string }) {
+  return (
+    <label className="toggle-wrap" style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' as const }}>
+      <div className={`toggle-track ${on ? 'on' : ''}`} onClick={onToggle}>
+        <div className="toggle-thumb" />
+      </div>
+      {label}
+    </label>
+  );
+}
+
+export type { Settings };
+
+export default function SettingsPanel({ settings, onChange, disabled }: Props) {
+  const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    onChange({ ...settings, [key]: value });
+  };
+
+  return (
+    <div style={{ position: 'relative' as const, marginBottom: '1.5rem' }}>
+      <div style={{
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        padding: '1.5rem',
+        opacity: disabled ? 0.5 : 1,
+        transition: 'opacity 0.2s',
+        pointerEvents: disabled ? 'none' : 'auto',
+      }}>
+        <p style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
+          textTransform: 'uppercase' as const,
+          color: 'var(--text-muted)', marginBottom: '1.25rem',
+        }}>
+          Nastavení vylepšení
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem' }}>
+
+          {/* Typ vylepšení */}
+          <div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Typ vylepšení</p>
+            <select
+              className="select"
+              value={settings.enhance_type}
+              onChange={e => set('enhance_type', e.target.value as Settings['enhance_type'])}
+              style={{ width: '100%' }}
+            >
+              <option value="neutral">Neutrální</option>
+              <option value="warm">Teplý</option>
+              <option value="modern">Moderní</option>
+            </select>
+          </div>
+
+          {/* Window pull */}
+          <div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Vytažení oken</p>
+            <select
+              className="select"
+              value={settings.window_pull_type}
+              onChange={e => set('window_pull_type', e.target.value as Settings['window_pull_type'])}
+              style={{ width: '100%' }}
+            >
+              <option value="NONE">Vypnuto</option>
+              <option value="ONLY_WINDOWS">Pouze okna</option>
+              <option value="WINDOWS_WITH_SKIES">Okna s oblohou</option>
+            </select>
+          </div>
+
+          {/* Cloud type */}
+          {settings.sky_replacement && (
+            <div>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Typ oblohy</p>
+              <select
+                className="select"
+                value={settings.cloud_type}
+                onChange={e => set('cloud_type', e.target.value as Settings['cloud_type'])}
+                style={{ width: '100%' }}
+              >
+                <option value="CLEAR">Jasno</option>
+                <option value="LOW_CLOUD">Nízké mraky</option>
+                <option value="HIGH_CLOUD">Vysoké mraky</option>
+              </select>
+            </div>
+          )}
+
+          {/* Toggles */}
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.85rem' }}>
+            <Toggle on={settings.sky_replacement} onToggle={() => set('sky_replacement', !settings.sky_replacement)} label="Výměna oblohy" />
+            <Toggle on={settings.vertical_correction} onToggle={() => set('vertical_correction', !settings.vertical_correction)} label="Korekce vertikály" />
+            <Toggle on={settings.lens_correction} onToggle={() => set('lens_correction', !settings.lens_correction)} label="Korekce objektivu" />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.85rem' }}>
+            <Toggle on={settings.upscale} onToggle={() => set('upscale', !settings.upscale)} label="Zvýšení rozlišení" />
+            <Toggle on={settings.privacy} onToggle={() => set('privacy', !settings.privacy)} label="Anonymizace (obličeje, SPZ)" />
+          </div>
+
+          {/* HDR sekce */}
+          <div style={{
+            gridColumn: '1 / -1',
+            borderTop: '1px solid var(--border)',
+            paddingTop: '1.25rem',
+            display: 'flex',
+            flexWrap: 'wrap' as const,
+            alignItems: 'center',
+            gap: '1.5rem',
+          }}>
+            <Toggle on={settings.hdr_mode} onToggle={() => set('hdr_mode', !settings.hdr_mode)} label="HDR režim — nahrát více expozic stejné scény" />
+
+            {settings.hdr_mode && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' as const }}>
+                  Počet bracketů na scénu
+                </p>
+                <select
+                  className="select"
+                  value={settings.hdr_brackets}
+                  onChange={e => {
+                    const v = e.target.value;
+                    set('hdr_brackets', v === 'auto' ? 'auto' : Number(v) as 3 | 5 | 7);
+                  }}
+                >
+                  <option value="auto">Automaticky (AI rozhodne)</option>
+                  <option value="3">3 brackety</option>
+                  <option value="5">5 bracketů</option>
+                  <option value="7">7 bracketů</option>
+                </select>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 260, lineHeight: 1.5 }}>
+                  {settings.hdr_brackets === 'auto'
+                    ? 'AI analyzuje vizuální podobnost a seskupí brackety sama.'
+                    : `Každých ${settings.hdr_brackets} souborů bude sloučeno do jednoho HDR snímku.`}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Overlay při zpracování */}
+      {disabled && (
+        <div style={{
+          position: 'absolute' as const,
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 'var(--radius)',
+          background: 'rgba(0,0,0,0.25)',
+          backdropFilter: 'blur(2px)',
+          zIndex: 10,
+        }}>
+          <p style={{
+            fontSize: 13,
+            color: 'var(--text-primary)',
+            fontWeight: 500,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            padding: '0.5rem 1rem',
+            borderRadius: 999,
+          }}>
+            🔒 Nastavení zamčeno — probíhá zpracování
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
