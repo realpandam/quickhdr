@@ -1,7 +1,16 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+const MAINTENANCE_MODE = process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true';
+
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Maintenance mode — povol jen /maintenance a statické soubory
+  if (MAINTENANCE_MODE && pathname !== '/maintenance') {
+    return NextResponse.rewrite(new URL('/maintenance', request.url));
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -27,7 +36,6 @@ export async function proxy(request: NextRequest) {
 
   await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
   if (pathname.startsWith('/dashboard')) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
