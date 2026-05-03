@@ -261,8 +261,7 @@ export default function LoginPage() {
           color: 'var(--text-primary)', marginBottom: '2.5rem',
           textAlign: 'center' as const,
         }}>
-          Filip Zemek
-          <span style={{ fontWeight: 300, color: 'var(--text-muted)', marginLeft: 6 }}>AI Retušování</span>
+          QUICKHDR
         </a>
 
         <div style={{
