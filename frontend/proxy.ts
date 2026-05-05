@@ -1,13 +1,10 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const MAINTENANCE_MODE = process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true';
-
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Maintenance mode — povol jen /maintenance a statické soubory
-  if (MAINTENANCE_MODE && pathname !== '/maintenance') {
+  if (process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true' && pathname !== '/maintenance') {
     return NextResponse.rewrite(new URL('/maintenance', request.url));
   }
 
