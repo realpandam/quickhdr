@@ -54,7 +54,7 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
                 notifyUrl: `${process.env.BACKEND_URL || 'https://fasthdr-production.up.railway.app'}/api/payments/notify`,
             });
 
-            const { error: upsertError } = await supabase.from('orders').upsert({
+            await supabase.from('orders').upsert({
                 image_id,
                 filename: filename ?? '',
                 payment_status: 'pending',
@@ -69,6 +69,7 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
         }
 
     } catch (error) {
+        console.error('Chyba při vytváření platby:', error);
         res.status(500).json({ error: 'Nepodařilo se vytvořit platbu' });
     }
 });
@@ -141,23 +142,6 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
 
     } catch (error) {
         res.status(500).json({ error: 'Nepodařilo se ověřit platbu' });
-    }
-});
-
-// GET /api/payments/verify-by-image/:imageId
-router.get('/verify-by-image/:imageId', async (req: Request, res: Response) => {
-    const { imageId } = req.params;
-    const { data: order } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('image_id', imageId)
-        .eq('payment_status', 'paid')
-        .single();
-
-    if (order) {
-        res.json({ image_id: order.image_id, paid: true });
-    } else {
-        res.status(402).json({ error: 'Platba nenalezena' });
     }
 });
 
@@ -264,6 +248,7 @@ async function sendConfirmationEmail(email: string, filename: string, imageId: s
             `,
         });
     } catch (err) {
+        console.error('Chyba při odesílání emailu:', err);
     }
 }
 

@@ -30,7 +30,7 @@ export default function PodminkyPage() {
         {[
           {
             title: '1. Provozovatel služby',
-            content: `Provozovatelem služby FASTHDR dostupné na adrese filipzemek.cz je Filip Zemek, IČO: 23584203, se sídlem Drnovec 1, 471 54 Cvikov, email: fotograf@filipzemek.cz.`,
+            content: `Provozovatelem služby FASTHDR dostupné na adrese fasthdr.cz je Filip Zemek, IČO: 23584203, se sídlem Drnovec 1, 471 54 Cvikov, email: info@fasthdr.cz.`,
           },
           {
             title: '2. Předmět služby',

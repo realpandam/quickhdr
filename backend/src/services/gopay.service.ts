@@ -31,7 +31,14 @@ interface GoPayPayment {
   };
 }
 
+// Token cache — GoPay token platí 30 minut, cachujeme na 25
+let cachedToken: { token: string; expires: number } | null = null;
+
 async function getAccessToken(): Promise<string> {
+  if (cachedToken && Date.now() < cachedToken.expires) {
+    return cachedToken.token;
+  }
+
   const response = await axios.post(
     `${GOPAY_API_URL}/oauth2/token`,
     'grant_type=client_credentials&scope=payment-create',
@@ -46,7 +53,13 @@ async function getAccessToken(): Promise<string> {
       },
     }
   );
-  return response.data.access_token;
+
+  cachedToken = {
+    token: response.data.access_token,
+    expires: Date.now() + 25 * 60 * 1000, // 25 minut
+  };
+
+  return cachedToken.token;
 }
 
 export async function createPayment(params: CreatePaymentParams): Promise<GoPayPayment> {
