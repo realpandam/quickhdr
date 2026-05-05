@@ -34,7 +34,7 @@ export default function OchranaPage() {
           },
           {
             title: '2. Jaké údaje zpracováváme',
-            content: `• Email a jméno (při registraci nebo platbě)\n• IP adresa a technické údaje o zařízení\n• Nahrané fotografie (dočasně po dobu zpracování a 7 dní po platbě)\n• Platební informace (zpracovává Stripe, my k nim nemáme přístup)`,
+            content: `• Email a jméno (při registraci nebo platbě)\n• IP adresa a technické údaje o zařízení\n• Nahrané fotografie (dočasně po dobu zpracování a 7 dní po platbě)\n• Platební informace (zpracovává GoPay, my k nim nemáme přístup)`,
           },
           {
             title: '3. Účel zpracování',
@@ -50,7 +50,7 @@ export default function OchranaPage() {
           },
           {
             title: '6. Příjemci údajů',
-            content: `Vaše údaje sdílíme s:\n• Autoenhance.ai — zpracování fotografií AI\n• Stripe — platební brána\n• Supabase — databáze a autentizace\n• Resend — emailové notifikace`,
+            content: `Vaše údaje sdílíme s:\n• Autoenhance.ai — zpracování fotografií AI\n• GoPay — platební brána\n• Supabase — databáze a autentizace\n• Resend — emailové notifikace`,
           },
           {
             title: '7. Vaše práva',

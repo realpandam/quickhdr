@@ -189,7 +189,7 @@ export default function Pricing() {
               {
                 icon: '🔒',
                 title: 'Bezpečná platba',
-                desc: 'Platby jsou zpracovávány přes Stripe. Vaše platební údaje nikdy nevidíme.',
+                desc: 'Platby jsou zpracovávány přes GoPay. Vaše platební údaje nikdy nevidíme.',
               },
               {
                 icon: '📁',

@@ -42,7 +42,7 @@ export default function PodminkyPage() {
           },
           {
             title: '4. Ceny a platby',
-            content: `Cena za zpracování jedné fotografie činí 59 Kč včetně DPH. Platby jsou zpracovávány prostřednictvím platební brány Stripe. Po úspěšné platbě je fotografie dostupná ke stažení po dobu 7 dní.`,
+            content: `Cena za zpracování jedné fotografie činí 59 Kč včetně DPH. Platby jsou zpracovávány prostřednictvím platební brány GoPay. Po úspěšné platbě je fotografie dostupná ke stažení po dobu 7 dní.`,
           },
           {
             title: '5. Dostupnost fotografií',

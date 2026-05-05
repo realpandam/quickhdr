@@ -38,7 +38,7 @@ export default function CookiesPage() {
           },
           {
             title: '3. Cookies třetích stran',
-            content: `• Stripe — platební brána (nezbytné pro zpracování plateb)\n• Supabase — autentizace a databáze`,
+            content: `• GoPay — platební brána (nezbytné pro zpracování plateb)\n• Supabase — autentizace a databáze`,
           },
           {
             title: '4. Jak cookies spravovat',
