@@ -24,6 +24,11 @@ interface GoPayPayment {
   amount: number;
   currency: string;
   order_number: string;
+  payer?: {
+    contact?: {
+      email?: string;
+    };
+  };
 }
 
 async function getAccessToken(): Promise<string> {
@@ -53,7 +58,7 @@ export async function createPayment(params: CreatePaymentParams): Promise<GoPayP
       payer: {
         allowed_payment_instruments: ['PAYMENT_CARD'],
         contact: {
-          email: params.email,
+          email: params.email || '',
           first_name: params.firstName || '',
           last_name: params.lastName || '',
         },
@@ -65,7 +70,7 @@ export async function createPayment(params: CreatePaymentParams): Promise<GoPayP
       amount: Math.round(params.amount * 100), // haléře
       currency: params.currency || 'CZK',
       order_number: params.orderId,
-      order_description: params.description || 'QuickHDR platba',
+      order_description: params.description || 'FASTHDR platba',
       callback: {
         return_url: params.returnUrl,
         notification_url: params.notifyUrl,

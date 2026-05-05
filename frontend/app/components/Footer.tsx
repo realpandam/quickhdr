@@ -16,7 +16,7 @@ export default function Footer() {
       }}>
         <div>
           <p style={{ fontSize: 14, fontWeight: 500, marginBottom: '0.5rem' }}>Filip Zemek</p>
-          <p style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: '0.25rem' }}>QUICKHDR</p>
+          <p style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: '0.25rem' }}>FASTHDR</p>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
             IČO: 23584203<br />
             Drnovec 1, 471 54 Cvikov<br />

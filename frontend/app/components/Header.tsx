@@ -56,7 +56,7 @@ export default function Header() {
             <a href="/" style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
               <img
                 src={isDark ? '/logo-dark.png' : '/logo-light.png'}
-                alt="QuickHDR"
+                alt="FASTHDR"
                 style={{ height: 28, width: 'auto', display: 'block' }}
               />
             </a>

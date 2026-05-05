@@ -3,7 +3,7 @@ import SessionTimeout from './components/SessionTImeout';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'QUICKHDR — Profesionální úprava fotografií',
+  title: 'FASTHDR — Profesionální úprava fotografií',
   description: 'Profesionální vylepšení fotografií pomocí umělé inteligence.',
 };
 

@@ -11,7 +11,7 @@ export default function PodminkyPage() {
       }}>
         <a href="/" style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
           Filip Zemek
-          <span style={{ fontWeight: 300, color: 'var(--text-muted)', marginLeft: 6 }}>QUICKHDR</span>
+          <span style={{ fontWeight: 300, color: 'var(--text-muted)', marginLeft: 6 }}>FASTHDR</span>
         </a>
       </header>
 
@@ -30,7 +30,7 @@ export default function PodminkyPage() {
         {[
           {
             title: '1. Provozovatel služby',
-            content: `Provozovatelem služby QUICKHDR dostupné na adrese filipzemek.cz je Filip Zemek, IČO: 23584203, se sídlem Drnovec 1, 471 54 Cvikov, email: fotograf@filipzemek.cz.`,
+            content: `Provozovatelem služby FASTHDR dostupné na adrese filipzemek.cz je Filip Zemek, IČO: 23584203, se sídlem Drnovec 1, 471 54 Cvikov, email: fotograf@filipzemek.cz.`,
           },
           {
             title: '2. Předmět služby',

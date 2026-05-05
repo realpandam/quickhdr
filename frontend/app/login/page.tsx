@@ -261,7 +261,7 @@ export default function LoginPage() {
           color: 'var(--text-primary)', marginBottom: '2.5rem',
           textAlign: 'center' as const,
         }}>
-          QUICKHDR
+          FASTHDR
         </a>
 
         <div style={{

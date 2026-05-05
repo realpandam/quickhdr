@@ -99,8 +99,6 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
       }
     );
 
-    console.log('Autoenhance response:', JSON.stringify(createResponse.data, null, 2));
-
     const { image_id, s3PutObjectUrl: upload_url } = createResponse.data;
 
     // Extrahuj Content-Type z presigned URL, fallback na náš mimeMap
@@ -129,8 +127,6 @@ router.get('/status/:imageId', async (req: Request, res: Response) => {
     const response = await axios.get(`${API_BASE}/v3/images/${imageId}`, {
       headers: { 'x-api-key': API_KEY },
     });
-
-    console.log('Status response:', response.data.status, response.data.status_reason);
 
     const { status } = response.data;
     res.json({ status });
@@ -276,8 +272,6 @@ router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), 
       { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } }
     );
 
-    console.log('Bracket response:', JSON.stringify(createResponse.data, null, 2));
-
     // Nový API vrací upload_url, starý s3PutObjectUrl
     const upload_url = createResponse.data.upload_url ?? createResponse.data.s3PutObjectUrl;
     const bracket_id = createResponse.data.bracket_id ?? createResponse.data.image_id;
@@ -353,18 +347,6 @@ router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => 
 
     const { status, images, is_merging, is_processing } = response.data;
 
-    console.log('Order status:', JSON.stringify({
-      status,
-      is_merging,
-      is_processing,
-      images: images?.map((img: any) => ({
-        image_id: img.image_id,
-        image_name: img.image_name,
-        status: img.status,
-        parent_image_id: img.parent_image_id,
-      }))
-    }, null, 2));
-
     const processedImages = (images ?? []).filter(
       (img: { status: string }) => img.status === 'processed'
     );
@@ -395,10 +377,10 @@ router.post('/notify', async (req: Request, res: Response) => {
     await supabase.from('orders').upsert({
       image_id,
       filename: filename && !filename.includes(image_id) ? filename : null,
-      stripe_payment_status: 'pending',
+      payment_status: 'pending',
       amount_czk: 59,
       user_id,
-      stripe_session_id: `pending_${image_id}`, // dočasný unikátní klíč
+      payment_session_id: `pending_${image_id}`, // dočasný unikátní klíč
     });
 
     // Získej email a pošli notifikaci
@@ -464,7 +446,6 @@ router.post('/notify', async (req: Request, res: Response) => {
       `,
     });
 
-    console.log('Notifikační email odeslán na:', userEmail);
     res.json({ ok: true });
   } catch (error) {
     console.error('Chyba při odesílání notifikace:', error);

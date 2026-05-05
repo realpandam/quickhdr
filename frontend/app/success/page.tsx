@@ -7,17 +7,17 @@ import { API_URL } from '../lib/config';
 function SuccessContent() {
   const searchParams = useSearchParams();
   const image_id = searchParams.get('image_id');
-  const session_id = searchParams.get('session_id');
+  const gopay_id = searchParams.get('gopay_id');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session_id || !image_id) {
+    if (!gopay_id || !image_id) {
       setStatus('error');
       return;
     }
 
-    fetch(`${API_URL}/api/payments/verify/${session_id}`)
+    fetch(`${API_URL}/api/payments/verify/${gopay_id}`)
       .then(res => res.json())
       .then(data => {
         if (data.paid) {
@@ -28,7 +28,7 @@ function SuccessContent() {
         }
       })
       .catch(() => setStatus('error'));
-  }, [session_id, image_id]);
+  }, [gopay_id, image_id]);
 
   return (
     <main style={{
@@ -39,27 +39,17 @@ function SuccessContent() {
       background: 'var(--bg)',
       padding: '2rem',
     }}>
-      <div style={{
-        maxWidth: 480,
-        width: '100%',
-        textAlign: 'center',
-      }}>
+      <div style={{ maxWidth: 480, width: '100%', textAlign: 'center' }}>
+
         {status === 'loading' && (
           <>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1rem' }}>
               Ověřuji platbu...
             </p>
-            <div style={{
-              height: 2,
-              background: 'var(--progress-bg)',
-              borderRadius: 999,
-              overflow: 'hidden',
-            }}>
+            <div style={{ height: 2, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
               <div style={{
-                height: '100%',
-                width: '60%',
-                background: 'var(--accent)',
-                borderRadius: 999,
+                height: '100%', width: '60%',
+                background: 'var(--accent)', borderRadius: 999,
                 animation: 'shimmer 1.5s infinite',
               }} />
             </div>
@@ -69,8 +59,7 @@ function SuccessContent() {
         {status === 'ready' && downloadUrl && (
           <>
             <div style={{
-              width: 56, height: 56,
-              borderRadius: '50%',
+              width: 56, height: 56, borderRadius: '50%',
               background: 'var(--accent-muted)',
               border: '1px solid var(--accent-glow)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -82,8 +71,7 @@ function SuccessContent() {
             <h1 style={{
               fontSize: '1.75rem', fontWeight: 700,
               letterSpacing: '-0.02em',
-              color: 'var(--text-primary)',
-              marginBottom: '0.75rem',
+              color: 'var(--text-primary)', marginBottom: '0.75rem',
             }}>
               Platba proběhla úspěšně
             </h1>
@@ -93,7 +81,6 @@ function SuccessContent() {
             }}>
               Vaše fotografie je připravena ke stažení v plném rozlišení.
             </p>
-
             <a
               href={downloadUrl}
               download
@@ -119,13 +106,12 @@ function SuccessContent() {
               Něco se pokazilo
             </h1>
             <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: '2rem' }}>
-              Nepodařilo se ověřit platbu. Kontaktujte nás na fotograf@filipzemek.cz
+              Nepodařilo se ověřit platbu. Kontaktujte nás na info@fasthdr.cz
             </p>
-            <a href="/" className="btn">
-              Zpět na hlavní stránku
-            </a>
+            <a href="/" className="btn">Zpět na hlavní stránku</a>
           </>
         )}
+
       </div>
     </main>
   );

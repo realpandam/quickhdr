@@ -38,7 +38,7 @@ export default function OchranaPage() {
           },
           {
             title: '3. Účel zpracování',
-            content: `• Poskytování služby QUICKHDR\n• Zpracování plateb\n• Zasílání emailových notifikací o stavu zpracování\n• Vedení historie objednávek pro registrované uživatele`,
+            content: `• Poskytování služby FASTHDR\n• Zpracování plateb\n• Zasílání emailových notifikací o stavu zpracování\n• Vedení historie objednávek pro registrované uživatele`,
           },
           {
             title: '4. Právní základ zpracování',

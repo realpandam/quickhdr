@@ -11,7 +11,7 @@ export default function MaintenancePage() {
         <div style={{ maxWidth: '480px', textAlign: 'center' }}>
 
           <p style={{ fontSize: '16px', fontWeight: 600, color: '#ffffff', marginBottom: '48px' }}>
-            QuickHDR
+            FASTHDR
             <span style={{ fontWeight: 300, color: '#666', marginLeft: '8px' }}>AI Retušování</span>
           </p>
 
@@ -35,8 +35,8 @@ export default function MaintenancePage() {
 
           <p style={{ fontSize: '13px', color: '#555', margin: 0 }}>
             Dotazy:{' '}
-            <a href="mailto:podpora@quickhdr.cz" style={{ color: '#f59e0b', textDecoration: 'none' }}>
-              podpora@quickhdr.cz
+            <a href="mailto:info@fasthdr.cz" style={{ color: '#f59e0b', textDecoration: 'none' }}>
+              info@fasthdr.cz
             </a>
           </p>
 

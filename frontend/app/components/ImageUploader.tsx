@@ -16,7 +16,7 @@ interface PhotoItem {
   status: FileStatus;
   progress: number;
   error: string | null;
-  hdr_group_id?: string;  // ← přidej toto
+  hdr_group_id?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -49,6 +49,8 @@ export default function ImageUploader() {
   const [isDragging, setIsDragging] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   const isProcessing = photos.some(p => p.status === 'uploading' || p.status === 'processing');
 
@@ -98,18 +100,15 @@ export default function ImageUploader() {
     items: PhotoItem[],
     currentSettings: Settings
   ) => {
-    // Označ všechny jako uploading
     items.forEach(item => updatePhoto(item.id, { status: 'uploading', progress: 0 }));
 
     try {
-      // 1. Vytvoř order
       const orderRes = await fetch(`${API_URL}/api/enhance/hdr/order`, {
         method: 'POST',
       });
       if (!orderRes.ok) throw new Error('Nepodařilo se vytvořit order');
       const { order_id } = await orderRes.json();
 
-      // 2. Nahraj každý bracket
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         const formData = new FormData();
@@ -128,8 +127,7 @@ export default function ImageUploader() {
         items.forEach(it => updatePhoto(it.id, { progress }));
       }
 
-      // 3. Spusť merge
-      const mergeRes = await fetch(`${API_URL}/api/enhance/hdr/order/${order_id}/merge`, {
+      await fetch(`${API_URL}/api/enhance/hdr/order/${order_id}/merge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -141,8 +139,6 @@ export default function ImageUploader() {
       });
 
       items.forEach(it => updatePhoto(it.id, { status: 'processing', progress: 45 }));
-
-      // 4. Polling orderu
       await pollOrderStatus(order_id, items);
 
     } catch (err) {
@@ -169,7 +165,6 @@ export default function ImageUploader() {
             items.forEach(it => updatePhoto(it.id, { progress: progressVal }));
           }
 
-          // Hotovo = není merging ani processing a máme image_ids
           const done = !is_merging && !is_processing && image_ids?.length > 0;
 
           if (done) {
@@ -187,7 +182,6 @@ export default function ImageUploader() {
               enhancedUrl: null,
             }));
 
-            // Pošli notifikaci přihlášenému uživateli
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
               await sendNotification(user.id, items[0].file.name, image_ids[0]);
@@ -221,7 +215,6 @@ export default function ImageUploader() {
                 enhancedUrl: `${API_URL}/api/enhance/enhanced/${imageId}`,
               });
 
-              // Pošli notifikaci přihlášenému uživateli
               const { data: { user } } = await supabase.auth.getUser();
               if (user) {
                 await sendNotification(user.id, filename, imageId);
@@ -242,6 +235,38 @@ export default function ImageUploader() {
       }, 2000);
     });
   };
+
+  // ─── Checkout ────────────────────────────────────────────
+  const handleCheckout = async (photo: PhotoItem) => {
+    try {
+      setCheckoutLoading(true);
+      const imageId = photo.enhancedUrl?.split('/').at(-1)?.split('?')[0];
+      if (!imageId) return;
+
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const res = await fetch(`${API_URL}/api/payments/create-checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_id: imageId,
+          filename: photo.file.name,
+          user_id: user?.id ?? null,
+          email: user?.email ?? null,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (err) {
+      console.error('Chyba při vytváření platby:', err);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+  // ─────────────────────────────────────────────────────────
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const rawExts = ['.arw', '.cr2', '.cr3', '.crw', '.nef', '.nrw', '.sr2', '.srf', '.raf', '.orf', '.rw2', '.pef', '.kdc', '.erf', '.dng', '.iiq', '.mos', '.mef', '.fff', '.3fr', '.x3f', '.rwl', '.srw'];
@@ -269,12 +294,8 @@ export default function ImageUploader() {
     setPhotos(prev => [...prev, ...newItems]);
 
     if (captured.hdr_mode) {
-      // HDR mód — všechny soubory = jedna HDR skupina
-      (async () => {
-        await processHdrGroup(newItems, captured);
-      })();
+      (async () => { await processHdrGroup(newItems, captured); })();
     } else {
-      // Standardní mód — zpracuj sekvenčně
       (async () => {
         for (const item of newItems) {
           await processPhoto(item, captured);
@@ -282,33 +303,6 @@ export default function ImageUploader() {
       })();
     }
   }, [settings, processPhoto, processHdrGroup]);
-
-  const handleCheckout = async (photo: PhotoItem) => {
-    try {
-      const imageId = photo.enhancedUrl?.split('/').at(-1)?.split('?')[0];
-      if (!imageId) return;
-
-      // Získej aktuálního uživatele
-      const { data: { user } } = await supabase.auth.getUser();
-
-      const res = await fetch(`${API_URL}/api/payments/create-checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_id: imageId,
-          filename: photo.file.name,
-          user_id: user?.id ?? null,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      }
-    } catch (err) {
-      console.error('Chyba při vytváření platby:', err);
-    }
-  };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -347,7 +341,6 @@ export default function ImageUploader() {
         Nahrajte fotografie
       </h2>
 
-      {/* Settings panel */}
       <SettingsPanel settings={settings} onChange={setSettings} disabled={isProcessing} />
 
       {/* Drop zone */}
@@ -499,13 +492,13 @@ export default function ImageUploader() {
                           >
                             Náhled
                           </button>
-
                           <button
                             onClick={() => handleCheckout(photo)}
                             className="btn btn-primary"
                             style={{ padding: '4px 10px', fontSize: 12 }}
+                            disabled={checkoutLoading}
                           >
-                            Koupit & Stáhnout
+                            {checkoutLoading ? 'Načítám…' : 'Koupit & Stáhnout'}
                           </button>
                         </div>
                       ) : photo.status === 'done' && photo.hdr_group_id ? (

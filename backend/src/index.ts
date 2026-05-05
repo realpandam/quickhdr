@@ -24,7 +24,3 @@ app.use('/api/payments', paymentsRouter);
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
-
-app.listen(PORT, () => {
-  console.log(`Backend běží na http://localhost:${PORT}`);
-});
