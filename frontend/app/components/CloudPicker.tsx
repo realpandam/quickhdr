@@ -1,7 +1,7 @@
 'use client';
 
 import Script from 'next/script';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface Props {
     onFiles: (files: File[]) => void;
@@ -70,7 +70,41 @@ export default function CloudPicker({ onFiles }: Props) {
     const tokenClient = useRef<{ requestAccessToken: () => void } | null>(null);
     const accessToken = useRef<string>('');
     const pickerReady = useRef(false);
-    const dropboxPopup = useRef<Window | null>(null);
+
+    // ── Dropbox — načtení složky ── MUSÍ být před useEffect ───────────────
+    const loadDropboxFolder = useCallback(async (token: string, path: string) => {
+        setDropboxLoading(true);
+        const res = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                path,
+                recursive: false,
+                include_media_info: true,
+            }),
+        });
+        const data = await res.json();
+        setDropboxEntries(data.entries ?? []);
+        setDropboxLoading(false);
+    }, []);
+
+    // ── Dropbox — obnova stavu po redirect ────────────────────────────────
+    useEffect(() => {
+        const pending = sessionStorage.getItem('dropbox_pending');
+        const token = sessionStorage.getItem('dropbox_token');
+
+        if (pending && token) {
+            sessionStorage.removeItem('dropbox_pending');
+            setDropboxToken(token);
+            setDropboxPath('');
+            setSelectedFiles([]);
+            setShowDropboxBrowser(true);
+            loadDropboxFolder(token, '');
+        }
+    }, [loadDropboxFolder]);
 
     // ── Google Drive picker ────────────────────────────────────────────────
     const showPicker = useCallback((token: string) => {
@@ -120,42 +154,23 @@ export default function CloudPicker({ onFiles }: Props) {
         }
     }, [onFiles]);
 
-    // ── Dropbox — načtení složky ───────────────────────────────────────────
-    const loadDropboxFolder = useCallback(async (token: string, path: string) => {
-        setDropboxLoading(true);
-        const res = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                path,
-                recursive: false,
-                include_media_info: true,
-            }),
-        });
-        const data = await res.json();
-        setDropboxEntries(data.entries ?? []);
-        setDropboxLoading(false);
-    }, []);
-
+    // ── Dropbox — OAuth redirect ───────────────────────────────────────────
     const openDropbox = useCallback(() => {
         const appKey = process.env.NEXT_PUBLIC_DROPBOX_APP_KEY;
         if (!appKey) return;
 
-        // Zkontroluj cached token — bez async
         const cachedToken = sessionStorage.getItem('dropbox_token');
         if (cachedToken) {
             setDropboxToken(cachedToken);
             setDropboxPath('');
             setSelectedFiles([]);
             setShowDropboxBrowser(true);
-            loadDropboxFolder(cachedToken, ''); // async, ale popup se neotevírá
+            loadDropboxFolder(cachedToken, '');
             return;
         }
 
-        // Otevři popup SYNCHRONNĚ — přímo v click handleru, žádný await před tím
+        sessionStorage.setItem('dropbox_pending', '1');
+
         const redirectUri = `${window.location.origin}/dropbox-callback.html`;
         const authUrl =
             `https://www.dropbox.com/oauth2/authorize?` +
@@ -163,38 +178,7 @@ export default function CloudPicker({ onFiles }: Props) {
             `&response_type=token` +
             `&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
-        const width = 800, height = 600;
-        const left = window.screenX + (window.outerWidth - width) / 2;
-        const top = window.screenY + (window.outerHeight - height) / 2;
-
-        // Toto musí být první window.open v call stacku — žádný await před tím ✅
-        const popup = window.open(
-            authUrl,
-            'dropbox-auth',
-            `width=${width},height=${height},left=${left},top=${top}`
-        );
-
-        if (!popup) {
-            alert('Povolte prosím vyskakovací okna pro fasthdr.cz v adresním řádku prohlížeče.');
-            return;
-        }
-
-        const handler = async (event: MessageEvent) => {
-            if (event.origin !== window.location.origin) return;
-            if (event.data?.type !== 'DROPBOX_TOKEN') return;
-
-            window.removeEventListener('message', handler);
-
-            const token = event.data.token;
-            sessionStorage.setItem('dropbox_token', token);
-            setDropboxToken(token);
-            setDropboxPath('');
-            setSelectedFiles([]);
-            setShowDropboxBrowser(true);
-            await loadDropboxFolder(token, '');
-        };
-
-        window.addEventListener('message', handler);
+        window.location.href = authUrl;
     }, [loadDropboxFolder]);
 
     // ── Dropbox — stažení vybraných souborů ───────────────────────────────

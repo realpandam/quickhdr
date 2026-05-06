@@ -8,12 +8,10 @@
   const params = new URLSearchParams(hash);
   const token = params.get('access_token');
 
-  if (token && window.opener) {
-    window.opener.postMessage(
-      { type: 'DROPBOX_TOKEN', token: token },
-      window.location.origin
-    );
-    window.close();
+  if (token) {
+    sessionStorage.setItem('dropbox_token', token);
+    // Přesměruj zpět na hlavní stránku
+    window.location.href = '/';
   }
 </script>
 </body>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { API_URL } from '../lib/config';
 import { supabase } from '../lib/supabase';
 import CloudPicker from './CloudPicker';
@@ -50,6 +50,20 @@ export default function ImageUploader() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+
+  useEffect(() => {
+    sessionStorage.setItem('pending_settings', JSON.stringify(settings));
+  }, [settings]);
+
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem('pending_settings');
+    if (saved) {
+      try {
+        setSettings(JSON.parse(saved));
+      } catch { }
+    }
+  }, []);
 
   const isProcessing = photos.some(p => p.status === 'uploading' || p.status === 'processing');
 
