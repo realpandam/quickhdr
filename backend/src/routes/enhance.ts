@@ -1,10 +1,10 @@
 import axios from 'axios';
 import { Request, Response, Router } from 'express';
+import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import { Resend } from 'resend';
 import { supabase } from '../lib/supabase';
-import fs from 'fs';
 
 const router = Router();
 
@@ -167,10 +167,10 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
       // Načti loga a konvertuj na base64
       const logoDarkPath = path.join(__dirname, '../../public/logo-dark.png');
       const logoLightPath = path.join(__dirname, '../../public/logo-light.png');
-      
+
       let logoDarkBase64 = '';
       let logoLightBase64 = '';
-      
+
       try {
         if (fs.existsSync(logoDarkPath)) {
           logoDarkBase64 = fs.readFileSync(logoDarkPath).toString('base64');
@@ -190,11 +190,16 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
           <!-- Diagonální vodoznak s logem střídavě -->
           <defs>
             <pattern id="wm-dark" x="0" y="0" width="300" height="300" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
-              ${logoDarkBase64 ? `<image href="data:image/png;base64,${logoDarkBase64}" x="0" y="0" width="200" height="200" opacity="0.3"/>` : ''}
+              ${logoDarkBase64
+          ? `<image href="data:image/png;base64,${logoDarkBase64}" x="0" y="0" width="200" height="200" opacity="0.3"/>`
+          : `<text x="0" y="100" font-family="Arial" font-size="24px" fill="rgba(255,255,255,0.35)">fasthdr.cz</text>`
+        }
             </pattern>
             <pattern id="wm-light" x="0" y="0" width="300" height="300" patternUnits="userSpaceOnUse" patternTransform="rotate(-35) translate(150, 150)">
-              ${logoLightBase64 ? `<image href="data:image/png;base64,${logoLightBase64}" x="0" y="0" width="200" height="200" opacity="0.3"/>` : ''}
-            </pattern>
+${logoLightBase64
+          ? `<image href="data:image/png;base64,${logoLightBase64}" x="0" y="0" width="200" height="200" opacity="0.3"/>`
+          : `<text x="0" y="100" font-family="Arial" font-size="24px" fill="rgba(255,255,255,0.35)">fasthdr.cz</text>`
+        }            </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#wm-dark)"/>
           <rect width="100%" height="100%" fill="url(#wm-light)"/>
