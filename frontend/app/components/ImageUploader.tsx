@@ -49,7 +49,6 @@ export default function ImageUploader() {
   const [isDragging, setIsDragging] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   const isProcessing = photos.some(p => p.status === 'uploading' || p.status === 'processing');
@@ -304,16 +303,20 @@ export default function ImageUploader() {
     }
   }, [settings, processPhoto, processHdrGroup]);
 
+  // ── Uzamčení drag & drop při zpracování ──────────────────
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    if (isProcessing) return;
     addFiles(e.dataTransfer.files);
-  }, [addFiles]);
+  }, [addFiles, isProcessing]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isProcessing) return;
     if (e.target.files) addFiles(e.target.files);
     e.target.value = '';
   };
+  // ─────────────────────────────────────────────────────────
 
   const handleReset = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
@@ -343,9 +346,9 @@ export default function ImageUploader() {
 
       <SettingsPanel settings={settings} onChange={setSettings} disabled={isProcessing} />
 
-      {/* Drop zone */}
+      {/* Drop zone — uzamčena při zpracování */}
       <label
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         style={{
@@ -353,8 +356,11 @@ export default function ImageUploader() {
           alignItems: 'center', justifyContent: 'center',
           border: `1px dashed ${isDragging ? 'var(--drop-border-active)' : 'var(--drop-border)'}`,
           borderRadius: 'var(--radius)',
-          padding: '3.5rem 2rem', cursor: 'pointer',
+          padding: '3.5rem 2rem',
+          cursor: isProcessing ? 'not-allowed' : 'pointer',
           background: isDragging ? 'var(--accent-muted)' : 'var(--drop-bg)',
+          opacity: isProcessing ? 0.5 : 1,
+          pointerEvents: isProcessing ? 'none' : 'auto',
           transition: 'all 0.2s', marginBottom: '2rem',
         }}
       >
@@ -368,10 +374,10 @@ export default function ImageUploader() {
           ↑
         </div>
         <p style={{ fontSize: 15, color: 'var(--text-primary)', marginBottom: '0.4rem', fontWeight: 500 }}>
-          Přetáhněte fotografie sem
+          {isProcessing ? 'Probíhá zpracování…' : 'Přetáhněte fotografie sem'}
         </p>
         <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          nebo klikněte pro výběr souborů
+          {isProcessing ? 'Počkejte na dokončení zpracování' : 'nebo klikněte pro výběr souborů'}
         </p>
         <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: '0.75rem', letterSpacing: '0.02em' }}>
           JPG · PNG · TIFF · WEBP · HEIC · RAW (ARW, CR2, CR3, NEF, DNG…) · max. 200 MB
@@ -380,12 +386,14 @@ export default function ImageUploader() {
           type="file" multiple
           accept="image/*,.arw,.cr3,.cr2,.crw,.nef,.nrw,.sr2,.srf,.raf,.orf,.rw2,.pef,.kdc,.erf,.dng,.iiq,.mos,.mef,.fff,.3fr,.x3f,.rwl,.srw"
           onChange={handleFileInput}
+          disabled={isProcessing}
           style={{ display: 'none' }}
         />
       </label>
 
-      <div style={{ marginBottom: '0' }}>
-        <CloudPicker onFiles={(files) => addFiles(files)} />
+      {/* CloudPicker — odsazení 2rem a uzamčení při zpracování */}
+      <div style={{ marginBottom: '2rem' }}>
+        <CloudPicker onFiles={(files) => { if (!isProcessing) addFiles(files); }} />
       </div>
 
       {/* Tabulka */}

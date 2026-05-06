@@ -4,6 +4,7 @@ import multer from 'multer';
 import path from 'path';
 import { Resend } from 'resend';
 import { supabase } from '../lib/supabase';
+import fs from 'fs';
 
 const router = Router();
 
@@ -163,44 +164,40 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
       const width = metadata.width ?? 800;
       const height = metadata.height ?? 600;
 
-      // Vytvoř SVG vodoznak
-      const watermarkText = 'filipzemek.cz — náhled';
-      const fontSize = Math.max(16, Math.round(width / 30));
+      // Načti loga a konvertuj na base64
+      const logoDarkPath = path.join(__dirname, '../../public/logo-dark.png');
+      const logoLightPath = path.join(__dirname, '../../public/logo-light.png');
+      
+      let logoDarkBase64 = '';
+      let logoLightBase64 = '';
+      
+      try {
+        if (fs.existsSync(logoDarkPath)) {
+          logoDarkBase64 = fs.readFileSync(logoDarkPath).toString('base64');
+        }
+        if (fs.existsSync(logoLightPath)) {
+          logoLightBase64 = fs.readFileSync(logoLightPath).toString('base64');
+        }
+      } catch (err) {
+        console.warn('Loga nenalezena:', err);
+      }
+
+      // Vytvoř SVG vodoznak s logem
       const padding = 20;
 
       const svgWatermark = Buffer.from(`
         <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-          <!-- Diagonální vodoznak opakující se přes celý obrázek -->
+          <!-- Diagonální vodoznak s logem střídavě -->
           <defs>
-            <pattern id="wm" x="0" y="0" width="300" height="200" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
-              <text x="0" y="100" 
-                font-family="Arial, sans-serif" 
-                font-size="${fontSize}px" 
-                fill="rgba(255,255,255,0.35)" 
-                font-weight="600"
-                letter-spacing="2">
-                ${watermarkText}
-              </text>
+            <pattern id="wm-dark" x="0" y="0" width="300" height="300" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
+              ${logoDarkBase64 ? `<image href="data:image/png;base64,${logoDarkBase64}" x="0" y="0" width="200" height="200" opacity="0.3"/>` : ''}
+            </pattern>
+            <pattern id="wm-light" x="0" y="0" width="300" height="300" patternUnits="userSpaceOnUse" patternTransform="rotate(-35) translate(150, 150)">
+              ${logoLightBase64 ? `<image href="data:image/png;base64,${logoLightBase64}" x="0" y="0" width="200" height="200" opacity="0.3"/>` : ''}
             </pattern>
           </defs>
-          <rect width="100%" height="100%" fill="url(#wm)"/>
-          <!-- Spodní pruh s logem -->
-          <rect x="0" y="${height - 48}" width="${width}" height="48" fill="rgba(0,0,0,0.55)"/>
-          <text x="${padding}" y="${height - 16}" 
-            font-family="Arial, sans-serif" 
-            font-size="14px" 
-            fill="rgba(255,255,255,0.9)"
-            font-weight="600">
-            Filip Zemek · AI Retušování
-          </text>
-          <text x="${width - padding}" y="${height - 16}" 
-            font-family="Arial, sans-serif" 
-            font-size="13px" 
-            fill="rgba(245,158,11,0.9)"
-            font-weight="600"
-            text-anchor="end">
-            Koupit plnou verzi →
-          </text>
+          <rect width="100%" height="100%" fill="url(#wm-dark)"/>
+          <rect width="100%" height="100%" fill="url(#wm-light)"/>
         </svg>
       `);
 
