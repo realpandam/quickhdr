@@ -140,24 +140,22 @@ export default function CloudPicker({ onFiles }: Props) {
         setDropboxLoading(false);
     }, []);
 
-    // ── Dropbox — OAuth popup ──────────────────────────────────────────────
     const openDropbox = useCallback(() => {
         const appKey = process.env.NEXT_PUBLIC_DROPBOX_APP_KEY;
-        if (!appKey) {
-            console.error('Dropbox App Key není nastaven');
-            return;
-        }
+        if (!appKey) return;
 
+        // Zkontroluj cached token — bez async
         const cachedToken = sessionStorage.getItem('dropbox_token');
         if (cachedToken) {
             setDropboxToken(cachedToken);
             setDropboxPath('');
             setSelectedFiles([]);
             setShowDropboxBrowser(true);
-            loadDropboxFolder(cachedToken, '');
+            loadDropboxFolder(cachedToken, ''); // async, ale popup se neotevírá
             return;
         }
 
+        // Otevři popup SYNCHRONNĚ — přímo v click handleru, žádný await před tím
         const redirectUri = `${window.location.origin}/dropbox-callback.html`;
         const authUrl =
             `https://www.dropbox.com/oauth2/authorize?` +
@@ -169,11 +167,17 @@ export default function CloudPicker({ onFiles }: Props) {
         const left = window.screenX + (window.outerWidth - width) / 2;
         const top = window.screenY + (window.outerHeight - height) / 2;
 
-        dropboxPopup.current = window.open(
+        // Toto musí být první window.open v call stacku — žádný await před tím ✅
+        const popup = window.open(
             authUrl,
             'dropbox-auth',
             `width=${width},height=${height},left=${left},top=${top}`
         );
+
+        if (!popup) {
+            alert('Povolte prosím vyskakovací okna pro fasthdr.cz v adresním řádku prohlížeče.');
+            return;
+        }
 
         const handler = async (event: MessageEvent) => {
             if (event.origin !== window.location.origin) return;
