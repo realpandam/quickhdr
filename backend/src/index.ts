@@ -10,7 +10,7 @@ import paymentsRouter from './routes/payments';
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:3000').split(',');
+const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:3000').split(',').map(o => o.trim());
 
 app.use(cors({ origin: process.env.FRONTEND_URL ?? 'http://localhost:3000' }));
 
@@ -23,6 +23,7 @@ app.use(express.urlencoded({ limit: '200mb', extended: true }));
 app.use('/api/enhance', enhanceRouter);
 app.use('/api/payments', paymentsRouter);
 
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -31,6 +32,7 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
+  credentials: true,
 }));
 
 app.get('/health', (_req, res) => {
