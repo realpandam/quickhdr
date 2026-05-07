@@ -21,6 +21,10 @@ app.use(express.urlencoded({ limit: '200mb', extended: true }));
 app.use('/api/enhance', enhanceRouter);
 app.use('/api/payments', paymentsRouter);
 
+app.use(cors({
+  origin: (process.env.FRONTEND_URL ?? 'http://localhost:3000').split(','),
+}));
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
