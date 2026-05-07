@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { API_URL } from '../lib/config';
 import { supabase } from '../lib/supabase';
 import CloudPicker from './CloudPicker';
+import ConsentCheckboxes from './ConsentCheckboxes';
 import SettingsPanel, { Settings } from './SettingsPanel';
 
 type FileStatus = 'waiting' | 'uploading' | 'processing' | 'done' | 'error';
@@ -50,6 +51,8 @@ export default function ImageUploader() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
 
   useEffect(() => {
     sessionStorage.setItem('pending_settings', JSON.stringify(settings));
@@ -514,11 +517,18 @@ export default function ImageUploader() {
                           >
                             Náhled
                           </button>
+
+                          <ConsentCheckboxes
+                            agreedToTerms={agreedToTerms}
+                            agreedToPrivacy={agreedToPrivacy}
+                            onTermsChange={setAgreedToTerms}
+                            onPrivacyChange={setAgreedToPrivacy}
+                          />
                           <button
                             onClick={() => handleCheckout(photo)}
                             className="btn btn-primary"
                             style={{ padding: '4px 10px', fontSize: 12 }}
-                            disabled={checkoutLoading}
+                            disabled={checkoutLoading || !agreedToTerms || !agreedToPrivacy}
                           >
                             {checkoutLoading ? 'Načítám…' : 'Koupit & Stáhnout'}
                           </button>

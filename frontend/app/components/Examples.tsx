@@ -8,19 +8,39 @@ interface Example {
 
 const EXAMPLES: Example[] = [
   {
-    title: 'Koupelna — výměna oblohy + vytažení oken', tag: 'Interiér',
-    settings: ['Výměna oblohy', 'Vytažení oken', 'Neutrální tón'],
-    before: '/examples/before-1.jpg', after: '/examples/after-1.jpg',
+    title: 'Černá obrazovka TV — odstranění nežádoucích prvků', tag: 'Interiér',
+    settings: ['Odstranění objektů', 'Neutrální tón'],
+    before: '/examples/cerna-obrazovka-tv-before.webp', after: '/examples/cerna-obrazovka-tv-after.webp',
   },
   {
-    title: 'Obývací pokoj — teplý tón + korekce vertikály', tag: 'Interiér',
-    settings: ['Teplý tón', 'Korekce vertikály', 'Korekce objektivu'],
-    before: '/examples/before-2.jpg', after: '/examples/after-2.jpg',
+    title: 'Čistý výhled z oken — vytažení oken', tag: 'Interiér',
+    settings: ['Vytažení oken', 'Neutrální tón'],
+    before: '/examples/cisty-vyhled-z-oken-before.webp', after: '/examples/cisty-vyhled-z-oken-after.webp',
+  },
+  // {
+  //   title: 'Odstranění fotografa — retušování odrazů', tag: 'Interiér',
+  //   settings: ['Odstranění objektů', 'Neutrální tón'],
+  //   before: '/examples/odstraneni-fotografa-before.webp', after: '/examples/odstraneni-fotografa-after.webp',
+  // },
+  {
+    title: 'Odstranění zkreslení — korekce objektivu', tag: 'Interiér',
+    settings: ['Korekce objektivu', 'Korekce vertikály'],
+    before: '/examples/odstraneni-zkresleni-before.webp', after: '/examples/odstraneni-zkresleni-after.webp',
   },
   {
-    title: 'Exteriér — výměna oblohy + moderní tón', tag: 'Exteriér',
-    settings: ['Výměna oblohy', 'Moderní tón', 'Korekce objektivu'],
-    before: '/examples/before-3.jpg', after: '/examples/after-3.jpg',
+    title: 'Srovnání linií — korekce perspektivy', tag: 'Exteriér',
+    settings: ['Korekce vertikály', 'Korekce objektivu'],
+    before: '/examples/srovnani-linii-before.webp', after: '/examples/srovnani-linii-after.webp',
+  },
+  {
+    title: 'Výměna oblohy — dramatická obloha', tag: 'Exteriér',
+    settings: ['Výměna oblohy', 'Moderní tón'],
+    before: '/examples/vymena-oblohy-before.webp', after: '/examples/vymena-oblohy-after.webp',
+  },
+  {
+    title: 'Zelenější trávník — úprava barev', tag: 'Exteriér',
+    settings: ['Teplý tón', 'Neutrální tón'],
+    before: '/examples/zelenejsi-travnik-before.webp', after: '/examples/zelenejsi-travnik-after.webp',
   },
 ];
 
