@@ -227,7 +227,9 @@ export default function LoginPage() {
     const returnTo = params.get('returnTo') ?? '/dashboard';
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback?returnTo=${returnTo}` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?returnTo=${returnTo}`,
+      },
     });
   };
 
