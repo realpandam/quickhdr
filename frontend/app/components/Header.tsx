@@ -68,7 +68,7 @@ export default function Header() {
               {[
                 { href: '/#jak-to-funguje', label: 'Jak to funguje' },
                 { href: '/#priklady', label: 'Příklady' },
-                { href: '/#ceník', label: 'Ceník' },
+                { href: '/#cenik', label: 'Ceník' },
               ].map(({ href, label }) => (
                 <a
                   key={href}
@@ -141,7 +141,7 @@ export default function Header() {
               style={{ fontSize: 15, color: 'var(--text-primary)', fontWeight: 500 }}>
               Příklady
             </a>
-            <a href="/#ceník" onClick={() => setMenuOpen(false)}
+            <a href="/#cenik" onClick={() => setMenuOpen(false)}
               style={{ fontSize: 15, color: 'var(--text-primary)', fontWeight: 500 }}>
               Ceník
             </a>

@@ -19,7 +19,7 @@ export default function Pricing() {
   const [hovered, setHovered] = useState(false);
 
   return (
-    <section style={{
+    <section id="cenik" style={{
       borderTop: '1px solid var(--border)',
       padding: '7rem 2rem',
       position: 'relative' as const,

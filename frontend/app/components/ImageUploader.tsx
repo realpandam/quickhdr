@@ -51,8 +51,19 @@ export default function ImageUploader() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [consentModal, setConsentModal] = useState<PhotoItem | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
+
+  const statusLabel: Record<FileStatus, string> = {
+    waiting: 'Čeká', uploading: 'Nahrávám…',
+    processing: 'Zpracovávám…', done: 'Hotovo', error: 'Chyba',
+  };
+
+  const statusColor: Record<FileStatus, string> = {
+    waiting: 'var(--text-muted)', uploading: 'var(--text-secondary)',
+    processing: 'var(--text-secondary)', done: 'var(--progress-done)', error: '#ef4444',
+  };
 
   useEffect(() => {
     sessionStorage.setItem('pending_settings', JSON.stringify(settings));
@@ -340,14 +351,32 @@ export default function ImageUploader() {
     setPhotos([]);
   };
 
-  const statusLabel: Record<FileStatus, string> = {
-    waiting: 'Čeká', uploading: 'Nahrávám…',
-    processing: 'Zpracovávám…', done: 'Hotovo', error: 'Chyba',
+  // Pomocná funkce — ulož souhlas na backend
+  const saveConsent = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    await fetch(`${API_URL}/api/enhance/consent`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
   };
 
-  const statusColor: Record<FileStatus, string> = {
-    waiting: 'var(--text-muted)', uploading: 'var(--text-secondary)',
-    processing: 'var(--text-secondary)', done: 'var(--progress-done)', error: '#ef4444',
+  // Kontrola existujícího souhlasu
+  const checkConsent = async (): Promise<boolean> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { data } = await supabase
+      .from('user_consents')
+      .select('agreed_to_terms_at')
+      .eq('user_id', user.id)
+      .single();
+
+    return !!data?.agreed_to_terms_at;
   };
 
   return (
@@ -445,12 +474,28 @@ export default function ImageUploader() {
                   }}>
                     {/* Náhled */}
                     <td style={{ padding: '0.75rem 1rem' }}>
-                      <div onClick={() => setLightbox(photo.previewUrl)} style={{
-                        width: 60, height: 44, borderRadius: 4, overflow: 'hidden',
-                        cursor: 'pointer', background: 'var(--bg-secondary)',
-                        border: '1px solid var(--border)',
-                      }}>
-                        <img src={photo.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <div
+                        onClick={() => photo.enhancedUrl
+                          ? setLightbox(photo.enhancedUrl)
+                          : undefined
+                        }
+                        style={{
+                          width: 60, height: 44, borderRadius: 4, overflow: 'hidden',
+                          cursor: photo.enhancedUrl ? 'pointer' : 'default',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        {photo.enhancedUrl ? (
+                          <img
+                            src={photo.enhancedUrl}
+                            alt=""
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 20, opacity: 0.3 }}>🖼️</span>
+                        )}
                       </div>
                     </td>
 
@@ -517,18 +562,18 @@ export default function ImageUploader() {
                           >
                             Náhled
                           </button>
-
-                          <ConsentCheckboxes
-                            agreedToTerms={agreedToTerms}
-                            agreedToPrivacy={agreedToPrivacy}
-                            onTermsChange={setAgreedToTerms}
-                            onPrivacyChange={setAgreedToPrivacy}
-                          />
                           <button
-                            onClick={() => handleCheckout(photo)}
+                            onClick={async () => {
+                              const hasConsent = await checkConsent();
+                              if (hasConsent) {
+                                handleCheckout(photo);
+                              } else {
+                                setConsentModal(photo);
+                              }
+                            }}
                             className="btn btn-primary"
                             style={{ padding: '4px 10px', fontSize: 12 }}
-                            disabled={checkoutLoading || !agreedToTerms || !agreedToPrivacy}
+                            disabled={checkoutLoading}
                           >
                             {checkoutLoading ? 'Načítám…' : 'Koupit & Stáhnout'}
                           </button>
@@ -553,6 +598,61 @@ export default function ImageUploader() {
             </button>
           </div>
         </>
+      )}
+
+      {/* Consent modal */}
+      {consentModal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1001,
+          background: 'rgba(0,0,0,0.85)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'var(--bg-card)',
+            borderRadius: 12,
+            width: 480,
+            padding: '2rem',
+            border: '1px solid var(--border)',
+          }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
+              Před dokončením objednávky
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+              Soubor: <strong style={{ color: 'var(--text-secondary)' }}>{consentModal.file.name}</strong>
+            </p>
+
+            <ConsentCheckboxes
+              agreedToTerms={agreedToTerms}
+              agreedToPrivacy={agreedToPrivacy}
+              onTermsChange={setAgreedToTerms}
+              onPrivacyChange={setAgreedToPrivacy}
+            />
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+              <button
+                className="btn"
+                onClick={() => {
+                  setConsentModal(null);
+                  setAgreedToTerms(false);
+                  setAgreedToPrivacy(false);
+                }}
+              >
+                Zrušit
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={!agreedToTerms || !agreedToPrivacy || checkoutLoading}
+                onClick={async () => {
+                  setConsentModal(null);
+                  await saveConsent();
+                  handleCheckout(consentModal);
+                }}
+              >
+                {checkoutLoading ? 'Načítám…' : 'Pokračovat k platbě'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Lightbox */}

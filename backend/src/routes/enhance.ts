@@ -365,6 +365,43 @@ router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => 
   }
 });
 
+router.post('/consent', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Chybí autorizační token' });
+      return;
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+
+    // Ověř uživatele přes token
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      res.status(401).json({ error: 'Neplatný token' });
+      return;
+    }
+
+    // Zapiš souhlas přes Service Role (obejde RLS)
+    const { error } = await supabase
+      .from('user_consents')
+      .upsert({
+        user_id: user.id,
+        agreed_to_terms_at: new Date().toISOString(),
+        agreed_to_privacy_at: new Date().toISOString(),
+        ip_address: req.headers['x-forwarded-for']?.toString() ?? req.socket.remoteAddress,
+        user_agent: req.headers['user-agent'],
+      });
+
+    if (error) throw error;
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Chyba při ukládání souhlasu:', error);
+    res.status(500).json({ error: 'Nepodařilo se uložit souhlas' });
+  }
+});
+
 // V notify endpointu — přidej uložení do Supabase
 router.post('/notify', async (req: Request, res: Response) => {
   try {

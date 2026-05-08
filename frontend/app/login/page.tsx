@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_URL } from '../lib/config';
 import { supabase } from '../lib/supabase';
 
 type Mode = 'login' | 'register' | 'forgot';
@@ -9,6 +10,7 @@ interface FormErrors {
   email?: string;
   password?: string;
   confirmPassword?: string;
+  consent?: string;
 }
 
 function validateEmail(email: string): boolean {
@@ -42,6 +44,20 @@ function translateError(message: string): string {
   return map[message] ?? message;
 }
 
+async function saveConsent(token: string) {
+  try {
+    await fetch(`${API_URL}/api/enhance/consent`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+  } catch {
+    // Souhlas není kritický pro přihlášení — ignoruj chybu
+  }
+}
+
 export default function LoginPage() {
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
@@ -53,18 +69,17 @@ export default function LoginPage() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
+  const [agreedToConsent, setAgreedToConsent] = useState(false);
 
   const [submitCount, setSubmitCount] = useState(0);
   const [lastSubmit, setLastSubmit] = useState<number>(0);
-  const RATE_LIMIT_MS = 3000; // 3 sekundy mezi pokusy
-  const MAX_ATTEMPTS = 5; // max 5 pokusů
+  const RATE_LIMIT_MS = 3000;
+  const MAX_ATTEMPTS = 5;
   const [blocked, setBlocked] = useState(false);
   const [blockTimer, setBlockTimer] = useState(0);
 
   const [returnTo, setReturnTo] = useState('/dashboard');
-
   const strength = mode === 'register' ? getPasswordStrength(password) : null;
-
   const [rememberEmail, setRememberEmail] = useState(false);
 
   useEffect(() => {
@@ -76,10 +91,7 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    if (!blocked) {
-      return
-    };
-
+    if (!blocked) return;
     const interval = setInterval(() => {
       setBlockTimer(prev => {
         if (prev <= 1) {
@@ -115,6 +127,9 @@ export default function LoginPage() {
     if (mode === 'register' && password !== confirmPassword) {
       errs.confirmPassword = 'Hesla se neshodují.';
     }
+    if (mode === 'register' && !agreedToConsent) {
+      errs.consent = 'Pro vytvoření účtu musíte souhlasit s podmínkami.';
+    }
     return errs;
   };
 
@@ -126,7 +141,6 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Rate limiting check
     const now = Date.now();
     if (blocked) return;
     if (now - lastSubmit < RATE_LIMIT_MS) return;
@@ -137,12 +151,12 @@ export default function LoginPage() {
 
     if (newCount >= MAX_ATTEMPTS) {
       setBlocked(true);
-      setBlockTimer(30); // zablokuj na 30 sekund
+      setBlockTimer(30);
       setMessage({ text: 'Příliš mnoho pokusů. Zkuste to znovu za 30 sekund.', type: 'error' });
       return;
     }
 
-    setTouched({ email: true, password: true, confirmPassword: true });
+    setTouched({ email: true, password: true, confirmPassword: true, consent: true });
     const errs = validate();
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
@@ -158,12 +172,19 @@ export default function LoginPage() {
 
     try {
       if (mode === 'register') {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
+
+        // Ulož souhlas přes backend pokud máme session
+        if (data.session?.access_token) {
+          await saveConsent(data.session.access_token);
+        }
+
         setMessage({ text: 'Účet byl vytvořen. Můžete se přihlásit.', type: 'success' });
         setMode('login');
         setPassword('');
         setConfirmPassword('');
+        setAgreedToConsent(false);
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -192,10 +213,7 @@ export default function LoginPage() {
         redirectTo: `${window.location.origin}/auth/reset-password`,
       });
       if (error) throw error;
-      setMessage({
-        text: 'Odkaz pro reset hesla byl odeslán na váš email.',
-        type: 'success',
-      });
+      setMessage({ text: 'Odkaz pro reset hesla byl odeslán na váš email.', type: 'success' });
     } catch (err: any) {
       setMessage({ text: translateError(err.message ?? 'Něco se pokazilo'), type: 'error' });
     } finally {
@@ -220,6 +238,7 @@ export default function LoginPage() {
     setMessage(null);
     setPassword('');
     setConfirmPassword('');
+    setAgreedToConsent(false);
   };
 
   const inputStyle = (field: keyof FormErrors): React.CSSProperties => ({
@@ -235,6 +254,11 @@ export default function LoginPage() {
     outline: 'none',
     transition: 'border-color 0.15s',
   });
+
+  const linkStyle: React.CSSProperties = {
+    color: 'var(--accent)',
+    textDecoration: 'underline',
+  };
 
   return (
     <main style={{
@@ -274,7 +298,7 @@ export default function LoginPage() {
           </p>
 
           {/* OAuth */}
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.75rem', marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.5rem', marginBottom: '1.5rem' }}>
             <button onClick={handleGoogle} disabled={loading} className="btn" style={{
               width: '100%', justifyContent: 'center', padding: '0.65rem', fontSize: 13, gap: 8,
             }}>
@@ -286,6 +310,14 @@ export default function LoginPage() {
               </svg>
               Pokračovat s Google
             </button>
+
+            {/* Informační text pro Google OAuth */}
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' as const, lineHeight: 1.5 }}>
+              Pokračováním souhlasíte s{' '}
+              <a href="/podminky" target="_blank" rel="noopener noreferrer" style={linkStyle}>VOP</a>
+              {' '}a{' '}
+              <a href="/ochrana-soukromi" target="_blank" rel="noopener noreferrer" style={linkStyle}>Zásadami ochrany osobních údajů</a>.
+            </p>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -330,30 +362,18 @@ export default function LoginPage() {
                 </p>
               )}
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="btn btn-primary"
-                style={{ width: '100%', justifyContent: 'center', padding: '0.7rem', fontSize: 14, opacity: loading ? 0.7 : 1 }}
-              >
+              <button type="submit" disabled={loading} className="btn btn-primary"
+                style={{ width: '100%', justifyContent: 'center', padding: '0.7rem', fontSize: 14, opacity: loading ? 0.7 : 1 }}>
                 {loading ? 'Odesílám...' : 'Odeslat odkaz'}
               </button>
 
-              <button
-                type="button"
+              <button type="button"
                 onClick={() => { setMode('login'); setMessage(null); setErrors({}); setTouched({}); }}
-                style={{
-                  background: 'none', border: 'none',
-                  color: 'var(--text-muted)', fontSize: 13,
-                  cursor: 'pointer', padding: 0, textAlign: 'center' as const,
-                }}
-              >
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', padding: 0, textAlign: 'center' as const }}>
                 ← Zpět na přihlášení
               </button>
             </form>
           ) : (
-
-
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column' as const, gap: '1rem' }}>
               {/* Email */}
               <div>
@@ -374,12 +394,7 @@ export default function LoginPage() {
                 )}
               </div>
 
-              <label className="toggle-wrap" style={{
-                fontSize: 12,
-                color: 'var(--text-muted)',
-                userSelect: 'none' as const,
-                marginTop: 4,
-              }}>
+              <label className="toggle-wrap" style={{ fontSize: 12, color: 'var(--text-muted)', userSelect: 'none' as const, marginTop: 4 }}>
                 <input
                   type="checkbox"
                   checked={rememberEmail}
@@ -404,31 +419,19 @@ export default function LoginPage() {
                     autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
                     style={inputStyle('password')}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    style={{
-                      position: 'absolute' as const, right: 10, top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'none', border: 'none',
-                      color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: 0,
-                    }}
-                  >
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} style={{
+                    position: 'absolute' as const, right: 10, top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none', border: 'none',
+                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: 0,
+                  }}>
                     {showPassword ? '🙈' : '👁'}
                   </button>
                 </div>
                 {mode === 'login' && (
-                  <button
-                    type="button"
+                  <button type="button"
                     onClick={() => { setMode('forgot'); setErrors({}); setTouched({}); setMessage(null); }}
-                    style={{
-                      background: 'none', border: 'none',
-                      color: 'var(--text-muted)', fontSize: 11,
-                      cursor: 'pointer', padding: 0,
-                      marginTop: 6, display: 'block',
-                      textAlign: 'right' as const, width: '100%',
-                    }}
-                  >
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', padding: 0, marginTop: 6, display: 'block', textAlign: 'right' as const, width: '100%' }}>
                     Zapomenuté heslo?
                   </button>
                 )}
@@ -436,13 +439,9 @@ export default function LoginPage() {
                   <p style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>{errors.password}</p>
                 )}
 
-                {/* Síla hesla */}
                 {mode === 'register' && password && strength && (
                   <div style={{ marginTop: 8 }}>
-                    <div style={{
-                      height: 3, background: 'var(--progress-bg)',
-                      borderRadius: 999, overflow: 'hidden',
-                    }}>
+                    <div style={{ height: 3, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
                       <div style={{
                         height: '100%',
                         width: `${(strength.score / 5) * 100}%`,
@@ -450,14 +449,12 @@ export default function LoginPage() {
                         transition: 'width 0.3s ease, background 0.3s ease',
                       }} />
                     </div>
-                    <p style={{ fontSize: 11, color: strength.color, marginTop: 4 }}>
-                      {strength.label}
-                    </p>
+                    <p style={{ fontSize: 11, color: strength.color, marginTop: 4 }}>{strength.label}</p>
                   </div>
                 )}
               </div>
 
-              {/* Potvrzení hesla — pouze při registraci */}
+              {/* Potvrzení hesla */}
               {mode === 'register' && (
                 <div>
                   <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
@@ -473,16 +470,12 @@ export default function LoginPage() {
                       autoComplete="new-password"
                       style={inputStyle('confirmPassword')}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirm(!showConfirm)}
-                      style={{
-                        position: 'absolute' as const, right: 10, top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'none', border: 'none',
-                        color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: 0,
-                      }}
-                    >
+                    <button type="button" onClick={() => setShowConfirm(!showConfirm)} style={{
+                      position: 'absolute' as const, right: 10, top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none', border: 'none',
+                      color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: 0,
+                    }}>
                       {showConfirm ? '🙈' : '👁'}
                     </button>
                   </div>
@@ -491,6 +484,46 @@ export default function LoginPage() {
                   )}
                   {confirmPassword && !errors.confirmPassword && password === confirmPassword && (
                     <p style={{ fontSize: 11, color: 'var(--progress-done)', marginTop: 4 }}>✓ Hesla se shodují</p>
+                  )}
+                </div>
+              )}
+
+              {/* Souhlas — pouze při registraci */}
+              {mode === 'register' && (
+                <div style={{
+                  padding: '0.75rem',
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 'var(--radius)',
+                  border: `1px solid ${touched.consent && errors.consent ? '#ef4444' : 'var(--border)'}`,
+                }}>
+                  <label style={{
+                    display: 'flex', alignItems: 'flex-start', gap: '0.6rem',
+                    cursor: 'pointer',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={agreedToConsent}
+                      onChange={e => {
+                        setAgreedToConsent(e.target.checked);
+                        if (touched.consent) setErrors(validate());
+                      }}
+                      style={{ marginTop: 2, accentColor: 'var(--accent)', flexShrink: 0 }}
+                    />
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                      Souhlasím s{' '}
+                      <a href="/podminky" target="_blank" rel="noopener noreferrer" style={linkStyle}>
+                        Všeobecnými obchodními podmínkami
+                      </a>
+                      {' '}a{' '}
+                      <a href="/ochrana-soukromi" target="_blank" rel="noopener noreferrer" style={linkStyle}>
+                        Zásadami ochrany osobních údajů
+                      </a>
+                      . Beru na vědomí, že platba za provedenou úpravu je konečná a nevratná s výjimkou prokazatelného technického selhání.{' '}
+                      <span style={{ color: '#ef4444' }}>*</span>
+                    </span>
+                  </label>
+                  {touched.consent && errors.consent && (
+                    <p style={{ fontSize: 11, color: '#ef4444', marginTop: 6, marginLeft: 22 }}>{errors.consent}</p>
                   )}
                 </div>
               )}
