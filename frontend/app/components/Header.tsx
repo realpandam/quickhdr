@@ -188,12 +188,17 @@ export default function Header() {
           display: flex;
           align-items: center;
           gap: 6px;
-          transition: color 0.2s, transform 0.15s;
-          padding: 4px 0;
+          transition: color 0.2s, transform 0.15s, background 0.2s, box-shadow 0.25s, border-color 0.2s;
+          padding: 4px 10px;
+          border-radius: var(--radius);
+          border: 1px solid transparent;
         }
         .header-auth-link:hover {
           color: var(--text-primary);
           transform: translateY(-1px);
+          border-color: rgba(139,92,246,0.7);
+          background: rgba(139,92,246,0.09);
+          box-shadow: 0 0 0 3px rgba(139,92,246,0.18), 0 4px 18px rgba(107,71,220,0.38);
         }
 
         /* Odhlásit button */

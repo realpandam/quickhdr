@@ -400,19 +400,23 @@ export default function DashboardPage() {
                       border: '1px solid var(--border)',
                       overflow: 'hidden',
                       background: 'var(--bg-card)',
-                      transition: 'all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                      transition: 'transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease',
                       transform: 'translateZ(0)',
                       cursor: 'default',
                       animation: `slideUp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${idx * 0.05}s both`,
                       boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
                     }}
                     onMouseEnter={e => {
-                      (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-8px)';
-                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 16px 32px rgba(0, 0, 0, 0.16)';
+                      const el = e.currentTarget as HTMLDivElement;
+                      el.style.transform = 'translateY(-8px)';
+                      el.style.boxShadow = '0 20px 60px rgba(139,92,246,0.18), 0 8px 24px rgba(0,0,0,0.18)';
+                      el.style.borderColor = 'rgba(139,92,246,0.55)';
                     }}
                     onMouseLeave={e => {
-                      (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
-                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+                      const el = e.currentTarget as HTMLDivElement;
+                      el.style.transform = 'translateY(0)';
+                      el.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+                      el.style.borderColor = 'var(--border)';
                     }}
                   >
                     {/* Image */}
