@@ -37,6 +37,7 @@ export default function DashboardPage() {
       }
       setUser(user);
 
+      // Smaž vypršené záznamy
       await supabase
         .from('orders')
         .delete()
@@ -97,8 +98,23 @@ export default function DashboardPage() {
     );
   }
 
+  // ── Souhlas check + platba ────────────────────────────────
   const handleBuy = async (order: Order) => {
     if (!user) return;
+
+    // Zkontroluj souhlas — přihlášený uživatel musí mít souhlas
+    const { data: consent } = await supabase
+      .from('user_consents')
+      .select('agreed_to_terms_at')
+      .eq('user_id', user.id)
+      .single();
+
+    if (!consent?.agreed_to_terms_at) {
+      // Přesměruj na hlavní stránku kde se zobrazí modal souhlasu
+      window.location.href = '/?consent=required';
+      return;
+    }
+
     const res = await fetch(`${API_URL}/api/payments/create-checkout`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -321,86 +337,43 @@ export default function DashboardPage() {
 
         {/* Empty State */}
         {orders.length === 0 ? (
-          <div style={{
-            textAlign: 'center' as const,
-            padding: '4rem 2rem',
-          }}>
+          <div style={{ textAlign: 'center' as const, padding: '4rem 2rem' }}>
             <div style={{ fontSize: 64, marginBottom: '1.5rem', opacity: 0.5 }}>📷</div>
-            <h2 style={{
-              fontSize: '1.5rem',
-              fontWeight: 700,
-              color: 'var(--text-primary)',
-              marginBottom: '0.5rem',
-            }}>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
               Zatím žádné fotografie
             </h2>
-            <p style={{
-              fontSize: '1rem',
-              color: 'var(--text-secondary)',
-              marginBottom: '2rem',
-            }}>
+            <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginBottom: '2rem' }}>
               Začněte nahráváním první fotografie
             </p>
             <a
               href="/#editor"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '12px 32px',
-                background: 'var(--accent)',
-                color: '#000',
-                border: 'none',
-                borderRadius: 8,
-                cursor: 'pointer',
-                fontSize: 15,
-                fontWeight: 700,
-                textDecoration: 'none',
-                fontFamily: 'inherit',
+                display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                padding: '12px 32px', background: 'var(--accent)', color: '#000',
+                border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15,
+                fontWeight: 700, textDecoration: 'none', fontFamily: 'inherit',
                 transition: 'all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
               }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-6px)';
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)';
-              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-6px)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)'; }}
             >
               Nahrát fotografie
             </a>
           </div>
         ) : filteredOrders.length === 0 ? (
-          <div style={{
-            textAlign: 'center' as const,
-            padding: '3rem 2rem',
-          }}>
-            <p style={{
-              fontSize: '1rem',
-              color: 'var(--text-secondary)',
-              marginBottom: '1.5rem',
-            }}>
+          <div style={{ textAlign: 'center' as const, padding: '3rem 2rem' }}>
+            <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
               Žádné fotografie neodpovídají hledaným kritériím
             </p>
             <button
               onClick={() => { setFilter('all'); setSearch(''); setSort('newest'); }}
               style={{
-                padding: '10px 28px',
-                fontSize: 14,
-                fontWeight: 600,
-                background: 'var(--accent)',
-                color: '#000',
-                border: 'none',
-                borderRadius: 6,
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                fontFamily: 'inherit',
+                padding: '10px 28px', fontSize: 14, fontWeight: 600,
+                background: 'var(--accent)', color: '#000', border: 'none',
+                borderRadius: 6, cursor: 'pointer', transition: 'all 0.3s ease', fontFamily: 'inherit',
               }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
-              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; }}
             >
               Zrušit filtry
             </button>
@@ -446,110 +419,63 @@ export default function DashboardPage() {
                     <div
                       onClick={() => setLightbox(`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=80`)}
                       style={{
-                        position: 'relative',
-                        width: '100%',
-                        paddingBottom: '100%',
-                        background: 'var(--bg-secondary)',
-                        cursor: 'zoom-in',
-                        overflow: 'hidden',
+                        position: 'relative', width: '100%', paddingBottom: '100%',
+                        background: 'var(--bg-secondary)', cursor: 'zoom-in', overflow: 'hidden',
                       }}
                     >
                       <img
                         src={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=60`}
                         alt={order.filename}
                         style={{
-                          position: 'absolute',
-                          inset: 0,
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                          transition: 'transform 0.4s ease-out',
+                          position: 'absolute', inset: 0, width: '100%', height: '100%',
+                          objectFit: 'cover', transition: 'transform 0.4s ease-out',
                         }}
-                        onMouseEnter={e => {
-                          (e.target as HTMLImageElement).style.transform = 'scale(1.08)';
-                        }}
-                        onMouseLeave={e => {
-                          (e.target as HTMLImageElement).style.transform = 'scale(1)';
-                        }}
+                        onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.08)'; }}
+                        onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
                         onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                       />
                     </div>
 
                     {/* Content */}
                     <div style={{ padding: '1rem' }}>
-                      {/* Filename */}
                       <p style={{
-                        fontSize: '0.875rem',
-                        fontWeight: 600,
-                        color: 'var(--text-primary)',
-                        marginBottom: '0.75rem',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
+                        fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)',
+                        marginBottom: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>
                         {order.filename && !order.filename.match(/^[0-9a-f-]{36}/)
-                          ? order.filename
-                          : 'Bez názvu'}
+                          ? order.filename : 'Bez názvu'}
                       </p>
 
-                      {/* Meta */}
                       <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: '1rem',
-                        fontSize: '0.75rem',
-                        color: 'var(--text-secondary)',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        marginBottom: '1rem', fontSize: '0.75rem', color: 'var(--text-secondary)',
                       }}>
                         <span>{new Date(order.created_at).toLocaleDateString('cs-CZ')}</span>
                         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{order.amount_czk} Kč</span>
                       </div>
 
-                      {/* Status Badge */}
                       <div className="status-row" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
                         <span style={{
-                          display: 'inline-block',
-                          padding: '4px 10px',
-                          borderRadius: 6,
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          letterSpacing: '0.05em',
-                          background: isPaid
-                            ? 'rgba(74, 222, 128, 0.15)'
-                            : order.payment_status === 'pending'
-                              ? 'rgba(251, 146, 60, 0.15)'
-                              : 'rgba(var(--text-muted-rgb, 100, 100, 100), 0.1)',
-                          color: isPaid
-                            ? '#4ade80'
-                            : order.payment_status === 'pending'
-                              ? '#fb923c'
-                              : 'var(--text-muted)',
+                          display: 'inline-block', padding: '4px 10px', borderRadius: 6,
+                          fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.05em',
+                          background: isPaid ? 'rgba(74, 222, 128, 0.15)' : order.payment_status === 'pending' ? 'rgba(251, 146, 60, 0.15)' : 'rgba(100, 100, 100, 0.1)',
+                          color: isPaid ? '#4ade80' : order.payment_status === 'pending' ? '#fb923c' : 'var(--text-muted)',
                           border: '1px solid',
-                          borderColor: isPaid
-                            ? 'rgba(74, 222, 128, 0.3)'
-                            : order.payment_status === 'pending'
-                              ? 'rgba(251, 146, 60, 0.3)'
-                              : 'rgba(var(--text-muted-rgb, 100, 100, 100), 0.2)',
+                          borderColor: isPaid ? 'rgba(74, 222, 128, 0.3)' : order.payment_status === 'pending' ? 'rgba(251, 146, 60, 0.3)' : 'rgba(100, 100, 100, 0.2)',
                         }}>
                           {isPaid ? '✓ Zaplaceno' : order.payment_status === 'pending' ? '⏳ Ke koupi' : '○ Čeká'}
                         </span>
                         {countdown && (
                           <div style={{
-                            fontSize: '0.75rem',
+                            fontSize: '0.75rem', fontWeight: 500,
                             color: expired ? '#ef4444' : countdown.startsWith('0h') ? '#f97316' : 'var(--text-muted)',
-                            fontWeight: 500,
                           }}>
                             {expired ? 'Vypršelo' : `Vyprší za ${countdown}`}
                           </div>
                         )}
                       </div>
 
-                      {/* Actions */}
-                      <div style={{
-                        display: 'flex',
-                        gap: '0.5rem',
-                        flexWrap: 'wrap',
-                      }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                         {isPaid && !expired ? (
                           <a
                             href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
@@ -558,20 +484,11 @@ export default function DashboardPage() {
                               : `foto_${new Date(order.created_at).toISOString().slice(0, 10)}_${order.image_id.slice(0, 8)}.jpg`
                             }
                             style={{
-                              flex: 1,
-                              textAlign: 'center',
-                              padding: '9px 12px',
-                              background: 'var(--accent)',
-                              color: '#000',
-                              border: 'none',
-                              borderRadius: 6,
-                              cursor: 'pointer',
-                              fontSize: '0.875rem',
-                              fontWeight: 700,
-                              textDecoration: 'none',
-                              transition: 'all 0.3s ease',
-                              display: 'block',
-                              fontFamily: 'inherit',
+                              flex: 1, textAlign: 'center', padding: '9px 12px',
+                              background: 'var(--accent)', color: '#000', border: 'none',
+                              borderRadius: 6, cursor: 'pointer', fontSize: '0.875rem',
+                              fontWeight: 700, textDecoration: 'none', transition: 'all 0.3s ease',
+                              display: 'block', fontFamily: 'inherit',
                             }}
                             onMouseEnter={e => {
                               (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)';
@@ -588,17 +505,9 @@ export default function DashboardPage() {
                           <button
                             onClick={() => handleBuy(order)}
                             style={{
-                              flex: 1,
-                              padding: '9px 12px',
-                              background: 'var(--accent)',
-                              color: '#000',
-                              border: 'none',
-                              borderRadius: 6,
-                              cursor: 'pointer',
-                              fontSize: '0.875rem',
-                              fontWeight: 700,
-                              transition: 'all 0.3s ease',
-                              fontFamily: 'inherit',
+                              flex: 1, padding: '9px 12px', background: 'var(--accent)',
+                              color: '#000', border: 'none', borderRadius: 6, cursor: 'pointer',
+                              fontSize: '0.875rem', fontWeight: 700, transition: 'all 0.3s ease', fontFamily: 'inherit',
                             }}
                             onMouseEnter={e => {
                               (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
@@ -616,17 +525,10 @@ export default function DashboardPage() {
                           <button
                             onClick={() => handleDelete(order.id)}
                             style={{
-                              flex: 1,
-                              padding: '9px 12px',
-                              background: 'rgba(239, 68, 68, 0.1)',
-                              color: '#ef4444',
-                              border: '1px solid rgba(239, 68, 68, 0.3)',
-                              borderRadius: 6,
-                              cursor: 'pointer',
-                              fontSize: '0.875rem',
-                              fontWeight: 700,
-                              transition: 'all 0.3s ease',
-                              fontFamily: 'inherit',
+                              flex: 1, padding: '9px 12px', background: 'rgba(239, 68, 68, 0.1)',
+                              color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)',
+                              borderRadius: 6, cursor: 'pointer', fontSize: '0.875rem',
+                              fontWeight: 700, transition: 'all 0.3s ease', fontFamily: 'inherit',
                             }}
                             onMouseEnter={e => {
                               (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239, 68, 68, 0.2)';
@@ -650,35 +552,22 @@ export default function DashboardPage() {
             {/* Pagination */}
             {totalPages > 1 && (
               <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.5rem',
-                padding: '2rem 0',
-                flexWrap: 'wrap',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                gap: '0.5rem', padding: '2rem 0', flexWrap: 'wrap',
               }}>
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={page === 1}
                   style={{
-                    padding: '9px 16px',
-                    fontSize: 14,
-                    fontWeight: 600,
+                    padding: '9px 16px', fontSize: 14, fontWeight: 600,
                     background: page === 1 ? 'var(--bg-secondary)' : 'var(--bg)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
+                    border: '1px solid var(--border)', borderRadius: 6,
                     color: page === 1 ? 'var(--text-muted)' : 'var(--text-primary)',
                     cursor: page === 1 ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.3s ease',
-                    opacity: page === 1 ? 0.5 : 1,
-                    fontFamily: 'inherit',
+                    transition: 'all 0.3s ease', opacity: page === 1 ? 0.5 : 1, fontFamily: 'inherit',
                   }}
-                  onMouseEnter={e => {
-                    if (page !== 1) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)';
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)';
-                  }}
+                  onMouseEnter={e => { if (page !== 1) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)'; }}
                 >
                   ← Předchozí
                 </button>
@@ -691,28 +580,16 @@ export default function DashboardPage() {
                       <button
                         onClick={() => setPage(p)}
                         style={{
-                          padding: '9px 14px',
-                          fontSize: 14,
+                          padding: '9px 14px', fontSize: 14,
                           fontWeight: p === page ? 700 : 600,
                           background: p === page ? 'var(--accent)' : 'var(--bg)',
                           color: p === page ? '#000' : 'var(--text-secondary)',
                           border: '1px solid',
                           borderColor: p === page ? 'var(--accent)' : 'var(--border)',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          transition: 'all 0.3s ease',
-                          fontFamily: 'inherit',
+                          borderRadius: 6, cursor: 'pointer', transition: 'all 0.3s ease', fontFamily: 'inherit',
                         }}
-                        onMouseEnter={e => {
-                          if (p !== page) {
-                            (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)';
-                          }
-                        }}
-                        onMouseLeave={e => {
-                          if (p !== page) {
-                            (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)';
-                          }
-                        }}
+                        onMouseEnter={e => { if (p !== page) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)'; }}
+                        onMouseLeave={e => { if (p !== page) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)'; }}
                       >
                         {p}
                       </button>
@@ -723,24 +600,15 @@ export default function DashboardPage() {
                   onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages}
                   style={{
-                    padding: '9px 16px',
-                    fontSize: 14,
-                    fontWeight: 600,
+                    padding: '9px 16px', fontSize: 14, fontWeight: 600,
                     background: page === totalPages ? 'var(--bg-secondary)' : 'var(--bg)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
+                    border: '1px solid var(--border)', borderRadius: 6,
                     color: page === totalPages ? 'var(--text-muted)' : 'var(--text-primary)',
                     cursor: page === totalPages ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.3s ease',
-                    opacity: page === totalPages ? 0.5 : 1,
-                    fontFamily: 'inherit',
+                    transition: 'all 0.3s ease', opacity: page === totalPages ? 0.5 : 1, fontFamily: 'inherit',
                   }}
-                  onMouseEnter={e => {
-                    if (page !== totalPages) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)';
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)';
-                  }}
+                  onMouseEnter={e => { if (page !== totalPages) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)'; }}
                 >
                   Další →
                 </button>
@@ -755,50 +623,30 @@ export default function DashboardPage() {
         <div
           onClick={() => setLightbox(null)}
           style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
+            position: 'fixed', inset: 0, zIndex: 1000,
             background: 'rgba(0, 0, 0, 0.95)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'zoom-out',
-            animation: 'fadeIn 0.3s ease-out',
-            backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'zoom-out', animation: 'fadeIn 0.3s ease-out', backdropFilter: 'blur(4px)',
           }}
         >
           <img
             src={lightbox}
             alt="Náhled"
             style={{
-              maxWidth: '90vw',
-              maxHeight: '90vh',
-              objectFit: 'contain',
-              borderRadius: 12,
-              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.4)',
+              maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain',
+              borderRadius: 12, boxShadow: '0 25px 60px rgba(0, 0, 0, 0.4)',
               animation: 'zoomIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
             }}
           />
           <button
             onClick={() => setLightbox(null)}
             style={{
-              position: 'fixed',
-              top: 28,
-              right: 32,
-              width: 44,
-              height: 44,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              position: 'fixed', top: 28, right: 32, width: 44, height: 44,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'rgba(255, 255, 255, 0.15)',
               border: '1.5px solid rgba(255, 255, 255, 0.25)',
-              borderRadius: '50%',
-              color: '#fff',
-              fontSize: 24,
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              backdropFilter: 'blur(8px)',
-              fontFamily: 'inherit',
+              borderRadius: '50%', color: '#fff', fontSize: 24, cursor: 'pointer',
+              transition: 'all 0.3s ease', backdropFilter: 'blur(8px)', fontFamily: 'inherit',
             }}
             onMouseEnter={e => {
               (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.25)';
@@ -816,38 +664,17 @@ export default function DashboardPage() {
 
       <style>{`
         @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
         }
-
         @keyframes fadeIn {
-          from {
-            opacity: 0;
-            backdrop-filter: blur(0px);
-          }
-          to {
-            opacity: 1;
-            backdrop-filter: blur(4px);
-          }
+          from { opacity: 0; backdrop-filter: blur(0px); }
+          to { opacity: 1; backdrop-filter: blur(4px); }
         }
-
         @keyframes zoomIn {
-          from {
-            opacity: 0;
-            transform: scale(0.92);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1);
-          }
+          from { opacity: 0; transform: scale(0.92); }
+          to { opacity: 1; transform: scale(1); }
         }
-
         select {
           appearance: none;
           background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
@@ -856,7 +683,6 @@ export default function DashboardPage() {
           background-size: 1rem;
           padding-right: 2.5rem;
         }
-
         @media (max-width: 768px) {
           div[style*="grid-template-columns"] {
             grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important;

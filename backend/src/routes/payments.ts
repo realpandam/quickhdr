@@ -8,7 +8,9 @@ const resend = new Resend(process.env.RESEND_API_KEY!);
 
 const PRICE_CZK = 59;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-const IS_MOCK = process.env.NODE_ENV !== 'production';
+
+// Mock flow — zapni přes GOPAY_MOCK=true v Railway nebo automaticky v development
+const IS_MOCK = process.env.GOPAY_MOCK === 'true' || process.env.NODE_ENV !== 'production';
 
 // ─────────────────────────────────────────────
 // POST /api/payments/create-checkout
@@ -24,11 +26,22 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
 
         const orderId = `ORDER-${image_id}-${Date.now()}`;
 
+        // Smaž staré pending záznamy pro stejný image_id a uživatele
+        // (zabránění duplicitám při opakovaném kliknutí na Koupit)
+        if (user_id) {
+            await supabase
+                .from('orders')
+                .delete()
+                .eq('image_id', image_id)
+                .eq('user_id', user_id)
+                .eq('payment_status', 'pending');
+        }
+
         if (IS_MOCK) {
-            // ── Mock flow (development) ──────────────────
+            // ── Mock flow ──────────────────────────────────
             const mockPaymentId = `MOCK-${Date.now()}`;
 
-            await supabase.from('orders').upsert({
+            await supabase.from('orders').insert({
                 image_id,
                 filename: filename ?? '',
                 payment_status: 'pending',
@@ -51,10 +64,10 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
                 email: email || '',
                 description: `FASTHDR — ${filename ?? 'fotografie'}`,
                 returnUrl: `${FRONTEND_URL}/success?image_id=${image_id}`,
-                notifyUrl: `${process.env.BACKEND_URL || 'https://fasthdr-production.up.railway.app'}/api/payments/notify`,
+                notifyUrl: `${process.env.BACKEND_URL || 'https://api.fasthdr.cz'}/api/payments/notify`,
             });
 
-            await supabase.from('orders').upsert({
+            await supabase.from('orders').insert({
                 image_id,
                 filename: filename ?? '',
                 payment_status: 'pending',
@@ -84,7 +97,7 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
 
         if (paymentId.startsWith('MOCK-')) {
             // ── Mock ověření ─────────────────────────────
-            const { data: order, error } = await supabase
+            const { data: order } = await supabase
                 .from('orders')
                 .select('*')
                 .eq('gopay_payment_id', paymentId)
@@ -108,7 +121,6 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
         }
 
         // ── GoPay ověření ────────────────────────────────
-        // Nejdřív zkontroluj DB
         const { data: order } = await supabase
             .from('orders')
             .select('*')
@@ -120,7 +132,6 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
             return;
         }
 
-        // Fallback — ověř přímo u GoPay
         const payment = await getPaymentStatus(paymentId);
 
         if (payment.state !== 'PAID') {
@@ -128,7 +139,6 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
             return;
         }
 
-        // Označ jako paid
         await supabase.from('orders')
             .update({ payment_status: 'paid' })
             .eq('gopay_payment_id', paymentId);
@@ -186,7 +196,7 @@ router.post('/notify', async (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────
-// Helper — email notifikace
+// Helper — email notifikace po platbě
 // ─────────────────────────────────────────────
 async function sendConfirmationEmail(email: string, filename: string, imageId: string) {
     try {
@@ -231,7 +241,7 @@ async function sendConfirmationEmail(email: string, filename: string, imageId: s
                                 <strong style="color:#888;">Soubor:</strong> ${filename || imageId}
                             </p>
                             <p style="font-size:13px;color:#666;margin:0 0 8px;">
-                                <strong style="color:#888;">Dostupné po dobu:</strong> 30 dní
+                                <strong style="color:#888;">Dostupné po dobu:</strong> 7 dní
                             </p>
                             <p style="font-size:13px;color:#666;margin:0;">
                                 <strong style="color:#888;">Podpora:</strong> info@fasthdr.cz
@@ -239,7 +249,8 @@ async function sendConfirmationEmail(email: string, filename: string, imageId: s
                         </div>
 
                         <p style="font-size:12px;color:#444;margin:0;line-height:1.6;">
-                            © ${new Date().getFullYear()} FASTHDR. Všechna práva vyhrazena.
+                            © ${new Date().getFullYear()} FASTHDR. Všechna práva vyhrazena.<br>
+                            IČO: 23584203 · Drnovec 1, 471 54 Cvikov
                         </p>
 
                     </div>

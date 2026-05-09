@@ -21,8 +21,8 @@ interface Props {
 
 function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; label: string }) {
   return (
-    <label className="toggle-wrap" style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' as const }}>
-      <div className={`toggle-track ${on ? 'on' : ''}`} onClick={onToggle}>
+    <label className="toggle-wrap" onClick={onToggle} style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' as const, cursor: 'pointer' }}>
+      <div className={`toggle-track ${on ? 'on' : ''}`}>
         <div className="toggle-thumb" />
       </div>
       {label}
@@ -88,33 +88,32 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             </select>
           </div>
 
-          {/* Cloud type */}
-          {settings.sky_replacement && (
-            <div>
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Typ oblohy</p>
-              <select
-                className="select"
-                value={settings.cloud_type}
-                onChange={e => set('cloud_type', e.target.value as Settings['cloud_type'])}
-                style={{ width: '100%' }}
-              >
-                <option value="CLEAR">Jasno</option>
-                <option value="LOW_CLOUD">Nízké mraky</option>
-                <option value="HIGH_CLOUD">Vysoké mraky</option>
-              </select>
-            </div>
-          )}
-
-          {/* Toggles */}
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.85rem' }}>
-            <Toggle on={settings.sky_replacement} onToggle={() => set('sky_replacement', !settings.sky_replacement)} label="Výměna oblohy" />
-            <Toggle on={settings.vertical_correction} onToggle={() => set('vertical_correction', !settings.vertical_correction)} label="Korekce vertikály" />
-            <Toggle on={settings.lens_correction} onToggle={() => set('lens_correction', !settings.lens_correction)} label="Korekce objektivu" />
+          {/* Cloud type — always rendered to prevent grid reflow */}
+          <div style={{ visibility: settings.sky_replacement ? 'visible' : 'hidden' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Typ oblohy</p>
+            <select
+              className="select"
+              value={settings.cloud_type}
+              onChange={e => set('cloud_type', e.target.value as Settings['cloud_type'])}
+              style={{ width: '100%' }}
+            >
+              <option value="CLEAR">Jasno</option>
+              <option value="LOW_CLOUD">Nízké mraky</option>
+              <option value="HIGH_CLOUD">Vysoké mraky</option>
+            </select>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.85rem' }}>
-            <Toggle on={settings.upscale} onToggle={() => set('upscale', !settings.upscale)} label="Zvýšení rozlišení" />
-            <Toggle on={settings.privacy} onToggle={() => set('privacy', !settings.privacy)} label="Anonymizace (obličeje, SPZ)" />
+          {/* Toggles — two columns, always on the same grid row */}
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '2.5rem', marginTop: '0.75rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.85rem' }}>
+              <Toggle on={settings.sky_replacement} onToggle={() => set('sky_replacement', !settings.sky_replacement)} label="Výměna oblohy" />
+              <Toggle on={settings.vertical_correction} onToggle={() => set('vertical_correction', !settings.vertical_correction)} label="Srovnání linií" />
+              <Toggle on={settings.lens_correction} onToggle={() => set('lens_correction', !settings.lens_correction)} label="Korekce objektivu" />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.85rem' }}>
+              <Toggle on={settings.upscale} onToggle={() => set('upscale', !settings.upscale)} label="Zvýšení rozlišení" />
+              <Toggle on={settings.privacy} onToggle={() => set('privacy', !settings.privacy)} label="Anonymizace (obličeje, SPZ)" />
+            </div>
           </div>
 
           {/* HDR sekce */}

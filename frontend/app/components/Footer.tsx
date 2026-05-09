@@ -15,13 +15,13 @@ export default function Footer() {
         gap: '2rem',
       }}>
         <div>
-          <p style={{ fontSize: 14, fontWeight: 500, marginBottom: '0.5rem' }}>Filip Zemek</p>
-          <p style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: '0.25rem' }}>FASTHDR</p>
+          <p style={{ fontSize: 14, fontWeight: 500, marginBottom: '0.5rem' }}>FASTHDR</p>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+            Provozovatel: Filip Zemek<br />
             IČO: 23584203<br />
             Drnovec 1, 471 54 Cvikov<br />
-            <a href="mailto:fotograf@filipzemek.cz" style={{ color: 'var(--text-muted)' }}>
-              fotograf@filipzemek.cz
+            <a href="mailto:info@fasthdr.cz" style={{ color: 'var(--text-muted)' }}>
+              info@fasthdr.cz
             </a>
           </p>
         </div>
@@ -34,7 +34,7 @@ export default function Footer() {
           </a>
         </nav>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'flex-end' }}>
-          © {new Date().getFullYear()} Filip Zemek. Všechna práva vyhrazena.
+          © {new Date().getFullYear()} FASTHDR. Všechna práva vyhrazena.
         </p>
       </div>
     </footer>

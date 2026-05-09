@@ -4,6 +4,7 @@ import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import { Resend } from 'resend';
+import { sendExpiryReminders } from '../jobs/expiry-reminder';
 import { supabase } from '../lib/supabase';
 
 const router = Router();
@@ -17,7 +18,6 @@ const API_KEY = process.env.AUTOENHANCE_API_KEY!;
 const API_BASE = 'https://api.autoenhance.ai';
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
-
 
 function getMimeType(filename: string, fallback: string): string {
   const ext = path.extname(filename).toLowerCase();
@@ -60,7 +60,7 @@ function getMimeType(filename: string, fallback: string): string {
   return mimeMap[ext] ?? fallback;
 }
 
-// Krok 1 + 2: Vytvoř image a nahraj soubor
+// ── Upload ────────────────────────────────────────────────────────────────────
 router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (req: Request, res: Response) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   const file = files['image']?.[0];
@@ -75,7 +75,6 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
     const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
     const rawSettings = req.body.settings ? JSON.parse(req.body.settings) : {};
 
-    // Krok 1: Vytvoř image metadata
     const createResponse = await axios.post(
       `${API_BASE}/v3/images/`,
       {
@@ -102,15 +101,11 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
 
     const { image_id, s3PutObjectUrl: upload_url } = createResponse.data;
 
-    // Extrahuj Content-Type z presigned URL, fallback na náš mimeMap
     const urlParams = new URL(upload_url);
     const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
-    // Krok 2: Nahraj binární soubor na presigned URL
     await axios.put(upload_url, file.buffer, {
-      headers: {
-        'Content-Type': contentTypeFromUrl,
-      },
+      headers: { 'Content-Type': contentTypeFromUrl },
     });
 
     res.json({ image_id });
@@ -120,15 +115,13 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
   }
 });
 
-// Krok 3: Polling — zjisti stav zpracování
+// ── Status ────────────────────────────────────────────────────────────────────
 router.get('/status/:imageId', async (req: Request, res: Response) => {
   try {
     const { imageId } = req.params;
-
     const response = await axios.get(`${API_BASE}/v3/images/${imageId}`, {
       headers: { 'x-api-key': API_KEY },
     });
-
     const { status } = response.data;
     res.json({ status });
   } catch (error) {
@@ -137,7 +130,7 @@ router.get('/status/:imageId', async (req: Request, res: Response) => {
   }
 });
 
-// Krok 4: Stáhni výsledek
+// ── Enhanced download ─────────────────────────────────────────────────────────
 router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
   try {
     const { imageId } = req.params;
@@ -156,15 +149,12 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
     );
 
     if (preview) {
-      // Přidej vodoznak pomocí Sharp
       const sharp = require('sharp');
-
       const imageBuffer = Buffer.from(response.data);
       const metadata = await sharp(imageBuffer).metadata();
       const width = metadata.width ?? 800;
       const height = metadata.height ?? 600;
 
-      // Načti loga a konvertuj na base64
       const logoDarkPath = path.join(__dirname, '../../public/logo-dark.png');
       const logoLightPath = path.join(__dirname, '../../public/logo-light.png');
 
@@ -182,12 +172,8 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
         console.warn('Loga nenalezena:', err);
       }
 
-      // Vytvoř SVG vodoznak s logem
-      const padding = 20;
-
       const svgWatermark = Buffer.from(`
         <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-          <!-- Diagonální vodoznak s logem střídavě -->
           <defs>
             <pattern id="wm-dark" x="0" y="0" width="300" height="300" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
               ${logoDarkBase64
@@ -196,10 +182,11 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
         }
             </pattern>
             <pattern id="wm-light" x="0" y="0" width="300" height="300" patternUnits="userSpaceOnUse" patternTransform="rotate(-35) translate(150, 150)">
-${logoLightBase64
+              ${logoLightBase64
           ? `<image href="data:image/png;base64,${logoLightBase64}" x="0" y="0" width="200" height="200" opacity="0.3"/>`
           : `<text x="0" y="100" font-family="Arial" font-size="24px" fill="rgba(255,255,255,0.35)">fasthdr.cz</text>`
-        }            </pattern>
+        }
+            </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#wm-dark)"/>
           <rect width="100%" height="100%" fill="url(#wm-light)"/>
@@ -207,11 +194,7 @@ ${logoLightBase64
       `);
 
       const watermarked = await sharp(imageBuffer)
-        .composite([{
-          input: svgWatermark,
-          top: 0,
-          left: 0,
-        }])
+        .composite([{ input: svgWatermark, top: 0, left: 0 }])
         .jpeg({ quality: 60 })
         .toBuffer();
 
@@ -219,7 +202,6 @@ ${logoLightBase64
       res.set('Cache-Control', 'public, max-age=3600');
       res.send(watermarked);
     } else {
-      // Plná verze bez vodoznaku
       res.set('Content-Type', 'image/jpeg');
       res.set('Content-Disposition', `attachment; filename="enhanced_${imageId}.jpg"`);
       res.send(Buffer.from(response.data));
@@ -230,7 +212,7 @@ ${logoLightBase64
   }
 });
 
-// HDR: Vytvoř order
+// ── HDR: Vytvoř order ─────────────────────────────────────────────────────────
 router.post('/hdr/order', async (req: Request, res: Response) => {
   try {
     const response = await axios.post(
@@ -245,7 +227,7 @@ router.post('/hdr/order', async (req: Request, res: Response) => {
   }
 });
 
-// HDR: Nahraj bracket do existujícího orderu — správný endpoint /v3/brackets/
+// ── HDR: Nahraj bracket ───────────────────────────────────────────────────────
 router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), async (req: Request, res: Response) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   const file = files['image']?.[0];
@@ -264,23 +246,16 @@ router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), 
       return;
     }
 
-    // Správný endpoint pro HDR brackety je /v3/brackets/ ne /v3/images/
     const createResponse = await axios.post(
       `${API_BASE}/v3/brackets/`,
-      {
-        order_id,
-        name: file.originalname,
-      },
+      { order_id, name: file.originalname },
       { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } }
     );
 
-    // Nový API vrací upload_url, starý s3PutObjectUrl
     const upload_url = createResponse.data.upload_url ?? createResponse.data.s3PutObjectUrl;
     const bracket_id = createResponse.data.bracket_id ?? createResponse.data.image_id;
 
-    if (!upload_url) {
-      throw new Error('Nepodařilo se získat upload URL');
-    }
+    if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
 
     const urlParams = new URL(upload_url);
     const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
@@ -298,7 +273,7 @@ router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), 
   }
 });
 
-// HDR: Spusť process orderu
+// ── HDR: Spusť process ────────────────────────────────────────────────────────
 router.post('/hdr/order/:orderId/merge', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
@@ -323,7 +298,6 @@ router.post('/hdr/order/:orderId/merge', async (req: Request, res: Response) => 
       body.number_of_brackets_per_image = number_of_brackets;
     }
 
-    // Správný endpoint je /process ne /merge
     await axios.post(
       `${API_BASE}/v3/orders/${orderId}/process`,
       body,
@@ -337,18 +311,16 @@ router.post('/hdr/order/:orderId/merge', async (req: Request, res: Response) => 
   }
 });
 
-// HDR: Stav orderu + image_ids výsledků
+// ── HDR: Stav orderu ──────────────────────────────────────────────────────────
 router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
-
     const response = await axios.get(
       `${API_BASE}/v3/orders/${orderId}`,
       { headers: { 'x-api-key': API_KEY } }
     );
 
     const { status, images, is_merging, is_processing } = response.data;
-
     const processedImages = (images ?? []).filter(
       (img: { status: string }) => img.status === 'processed'
     );
@@ -365,6 +337,7 @@ router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => 
   }
 });
 
+// ── Souhlas ───────────────────────────────────────────────────────────────────
 router.post('/consent', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
@@ -374,15 +347,12 @@ router.post('/consent', async (req: Request, res: Response) => {
     }
 
     const token = authHeader.replace('Bearer ', '');
-
-    // Ověř uživatele přes token
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
       res.status(401).json({ error: 'Neplatný token' });
       return;
     }
 
-    // Zapiš souhlas přes Service Role (obejde RLS)
     const { error } = await supabase
       .from('user_consents')
       .upsert({
@@ -394,7 +364,6 @@ router.post('/consent', async (req: Request, res: Response) => {
       });
 
     if (error) throw error;
-
     res.json({ ok: true });
   } catch (error) {
     console.error('Chyba při ukládání souhlasu:', error);
@@ -402,7 +371,23 @@ router.post('/consent', async (req: Request, res: Response) => {
   }
 });
 
-// V notify endpointu — přidej uložení do Supabase
+// ── Cron: expiry reminders ────────────────────────────────────────────────────
+router.get('/cron/expiry-reminders', async (req: Request, res: Response) => {
+  const cronSecret = req.headers['x-cron-secret'];
+  if (cronSecret !== process.env.CRON_SECRET) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  try {
+    await sendExpiryReminders();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Chyba cron jobu:', err);
+    res.status(500).json({ error: 'Cron job selhal' });
+  }
+});
+
+// ── Notify: zpracování dokončeno ──────────────────────────────────────────────
 router.post('/notify', async (req: Request, res: Response) => {
   try {
     const { user_id, filename, image_id } = req.body;
@@ -412,17 +397,15 @@ router.post('/notify', async (req: Request, res: Response) => {
       return;
     }
 
-    // Ulož zpracovanou fotku do databáze jako pending
     await supabase.from('orders').upsert({
       image_id,
       filename: filename && !filename.includes(image_id) ? filename : null,
       payment_status: 'pending',
       amount_czk: 59,
       user_id,
-      payment_session_id: `pending_${image_id}`, // dočasný unikátní klíč
+      payment_session_id: `pending_${image_id}`,
     });
 
-    // Získej email a pošli notifikaci
     const { data: userData, error } = await supabase.auth.admin.getUserById(user_id);
     if (error || !userData?.user?.email) {
       res.status(404).json({ error: 'Uživatel nenalezen' });
@@ -432,7 +415,7 @@ router.post('/notify', async (req: Request, res: Response) => {
     const userEmail = userData.user.email;
 
     await resend.emails.send({
-      from: process.env.FROM_EMAIL ?? 'onboarding@resend.dev',
+      from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
       to: userEmail,
       subject: 'Vaše fotografie je zpracována a připravena ke koupi',
       html: `
@@ -444,21 +427,20 @@ router.post('/notify', async (req: Request, res: Response) => {
         </head>
         <body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
           <div style="max-width:560px;margin:0 auto;padding:48px 24px;">
-            
+
             <p style="font-size:14px;font-weight:600;color:#ffffff;margin:0 0 40px;">
-              Filip Zemek
-              <span style="font-weight:300;color:#666;margin-left:6px;">AI Retušování</span>
+              FASTHDR
             </p>
 
             <h1 style="font-size:24px;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
               Zpracování dokončeno ✓
             </h1>
             <p style="font-size:15px;color:#888;margin:0 0 32px;line-height:1.6;">
-              Vaše fotografie <strong style="color:#ccc;">${filename ?? 'bez názvu'}</strong> 
+              Vaše fotografie <strong style="color:#ccc;">${filename ?? 'bez názvu'}</strong>
               byla úspěšně zpracována pomocí AI. Můžete si prohlédnout náhled a zakoupit plné rozlišení.
             </p>
 
-            <a href="${process.env.FRONTEND_URL}/dashboard" 
+            <a href="${process.env.FRONTEND_URL}/dashboard"
                style="display:inline-block;background:#f59e0b;color:#000;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;text-decoration:none;margin-bottom:32px;">
               Zobrazit v Moje fotografie →
             </a>
@@ -471,12 +453,12 @@ router.post('/notify', async (req: Request, res: Response) => {
                 <strong style="color:#888;">Cena:</strong> 59 Kč
               </p>
               <p style="font-size:13px;color:#666;margin:0;">
-                <strong style="color:#888;">Podpora:</strong> fotograf@filipzemek.cz
+                <strong style="color:#888;">Podpora:</strong> info@fasthdr.cz
               </p>
             </div>
 
             <p style="font-size:12px;color:#444;margin:0;line-height:1.6;">
-              © ${new Date().getFullYear()} Filip Zemek. Všechna práva vyhrazena.<br>
+              © ${new Date().getFullYear()} FASTHDR. Všechna práva vyhrazena.<br>
               IČO: 23584203 · Drnovec 1, 471 54 Cvikov
             </p>
           </div>
