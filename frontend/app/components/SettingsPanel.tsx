@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 interface Settings {
   enhance_type: 'warm' | 'neutral' | 'modern';
   sky_replacement: boolean;
@@ -33,21 +35,28 @@ function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; la
 export type { Settings };
 
 export default function SettingsPanel({ settings, onChange, disabled }: Props) {
+  const [hovered, setHovered] = useState(false);
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     onChange({ ...settings, [key]: value });
   };
 
   return (
     <div style={{ position: 'relative' as const, marginBottom: '1.5rem' }}>
-      <div style={{
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius)',
-        padding: '1.5rem',
-        opacity: disabled ? 0.5 : 1,
-        transition: 'opacity 0.2s',
-        pointerEvents: disabled ? 'none' : 'auto',
-      }}>
+      <div
+        onMouseEnter={() => { if (!disabled) setHovered(true); }}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          background: 'var(--bg-card)',
+          border: `1px solid ${hovered ? 'var(--accent)' : 'var(--border)'}`,
+          borderRadius: 'var(--radius)',
+          padding: '1.5rem',
+          opacity: disabled ? 0.5 : 1,
+          transition: 'opacity 0.2s, border-color 0.3s, box-shadow 0.3s',
+          pointerEvents: disabled ? 'none' : 'auto',
+          boxShadow: hovered
+            ? '0 20px 60px rgba(139,92,246,0.15), 0 4px 20px rgba(0,0,0,0.2)'
+            : '0 2px 8px rgba(0,0,0,0.1)',
+        }}>
         <p style={{
           fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
           textTransform: 'uppercase' as const,

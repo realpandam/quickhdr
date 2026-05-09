@@ -51,6 +51,7 @@ export default function ImageUploader() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [hoveredDrop, setHoveredDrop] = useState(false);
   const [consentModal, setConsentModal] = useState<PhotoItem | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
@@ -397,17 +398,22 @@ export default function ImageUploader() {
         onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
+        onMouseEnter={() => { if (!isProcessing) setHoveredDrop(true); }}
+        onMouseLeave={() => setHoveredDrop(false)}
         style={{
           display: 'flex', flexDirection: 'column' as const,
           alignItems: 'center', justifyContent: 'center',
-          border: `1px dashed ${isDragging ? 'var(--drop-border-active)' : 'var(--drop-border)'}`,
+          border: `1px dashed ${isDragging ? 'var(--drop-border-active)' : hoveredDrop ? 'var(--accent)' : 'var(--drop-border)'}`,
           borderRadius: 'var(--radius)',
           padding: '3.5rem 2rem',
           cursor: isProcessing ? 'not-allowed' : 'pointer',
           background: isDragging ? 'var(--accent-muted)' : 'var(--drop-bg)',
           opacity: isProcessing ? 0.5 : 1,
           pointerEvents: isProcessing ? 'none' : 'auto',
-          transition: 'all 0.2s', marginBottom: '2rem',
+          transition: 'border-color 0.3s, box-shadow 0.3s', marginBottom: '2rem',
+          boxShadow: hoveredDrop && !isProcessing
+            ? '0 20px 60px rgba(139,92,246,0.15), 0 4px 20px rgba(0,0,0,0.2)'
+            : '0 2px 8px rgba(0,0,0,0.1)',
         }}
       >
         <div style={{

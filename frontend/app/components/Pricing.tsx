@@ -17,6 +17,7 @@ const features = [
 
 export default function Pricing() {
   const [hovered, setHovered] = useState(false);
+  const [hoveredInfo, setHoveredInfo] = useState(false);
 
   return (
     <section id="cenik" style={{
@@ -166,15 +167,22 @@ export default function Pricing() {
           </div>
 
           {/* Info karta */}
-          <div style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius)',
-            padding: '2.5rem',
-            display: 'flex',
-            flexDirection: 'column' as const,
-            gap: '1.5rem',
-          }}>
+          <div
+            onMouseEnter={() => setHoveredInfo(true)}
+            onMouseLeave={() => setHoveredInfo(false)}
+            style={{
+              background: 'var(--bg-card)',
+              border: `1px solid ${hoveredInfo ? 'var(--accent)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius)',
+              padding: '2.5rem',
+              display: 'flex',
+              flexDirection: 'column' as const,
+              gap: '1.5rem',
+              transition: 'border-color 0.3s, box-shadow 0.3s',
+              boxShadow: hoveredInfo
+                ? '0 20px 60px rgba(139,92,246,0.15), 0 4px 20px rgba(0,0,0,0.2)'
+                : '0 2px 8px rgba(0,0,0,0.1)',
+            }}>
             {[
               {
                 icon: '👁',

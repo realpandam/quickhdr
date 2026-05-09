@@ -131,14 +131,15 @@ button {
 .btn-primary {
   background: linear-gradient(135deg, #6B47DC 0%, #8B5CF6 60%, #A78BFA 100%);
   color: #fff;
-  border-color: transparent;
+  border: none;
+  outline: none;
   font-weight: 600;
   box-shadow: 0 2px 12px rgba(107,71,220,0.3);
   transition: transform 0.15s, box-shadow 0.2s, filter 0.2s;
 }
 .btn-primary:hover {
   background: linear-gradient(135deg, #6B47DC 0%, #8B5CF6 60%, #A78BFA 100%);
-  border-color: transparent;
+  border: none;
   color: #fff;
   transform: translateY(-2px);
   box-shadow: 0 6px 24px rgba(107,71,220,0.5);
@@ -405,21 +406,3 @@ button {
   100% { background-position: 400px 0; }
 }
 
-.btn-primary::after {
-  content: '';
-  position: absolute;
-  top: 0; left: -100%;
-  width: 60%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,0.15),
-    transparent
-  );
-  transform: skewX(-20deg);
-  transition: left 0.5s ease;
-}
-.btn-primary:hover::after {
-  left: 150%;
-}
