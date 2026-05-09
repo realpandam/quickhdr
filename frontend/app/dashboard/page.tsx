@@ -16,7 +16,7 @@ interface Order {
   expires_at: string;
 }
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 12;
 
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -37,14 +37,12 @@ export default function DashboardPage() {
       }
       setUser(user);
 
-      // Smaž vypršené záznamy POUZE tohoto uživatele
       await supabase
         .from('orders')
         .delete()
         .eq('user_id', user.id)
         .lt('expires_at', new Date().toISOString());
 
-      // Načti POUZE objednávky přihlášeného uživatele
       const { data } = await supabase
         .from('orders')
         .select('*')
@@ -57,11 +55,6 @@ export default function DashboardPage() {
 
     init();
   }, []);
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    window.location.href = '/';
-  };
 
   const filteredOrders = orders
     .filter(order => {
@@ -99,7 +92,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <main style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Načítám...</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Načítám...</p>
       </main>
     );
   }
@@ -112,8 +105,8 @@ export default function DashboardPage() {
       body: JSON.stringify({
         image_id: order.image_id,
         filename: order.filename,
-        user_id: user.id,           // vždy posílej user_id
-        email: user.email ?? null,  // vždy posílej email
+        user_id: user.id,
+        email: user.email ?? null,
       }),
     });
     const data = await res.json();
@@ -121,7 +114,6 @@ export default function DashboardPage() {
   };
 
   const handleDelete = async (orderId: string) => {
-    // Smaž pouze pokud order patří přihlášenému uživateli
     await supabase
       .from('orders')
       .delete()
@@ -134,7 +126,6 @@ export default function DashboardPage() {
     const expiredIds = orders
       .filter(o => new Date(o.expires_at) < new Date())
       .map(o => o.id);
-    // Smaž pouze vlastní vypršené objednávky
     await supabase
       .from('orders')
       .delete()
@@ -147,403 +138,613 @@ export default function DashboardPage() {
     <main style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <Header />
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(1.5rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem)' }}>
-        <div style={{ marginBottom: '2.5rem' }}>
-          <div className="tag">Moje fotografie</div>
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: 'clamp(2.5rem, 5vw, 3.5rem) clamp(1.5rem, 4vw, 2.5rem)' }}>
+        {/* Header */}
+        <div style={{ marginBottom: '3.5rem' }}>
           <h1 style={{
-            fontSize: 'clamp(1.5rem, 3vw, 2rem)',
-            fontWeight: 700, letterSpacing: '-0.02em',
-            color: 'var(--text-primary)', marginBottom: '0.5rem',
+            fontSize: 'clamp(2.2rem, 6vw, 3rem)',
+            fontWeight: 900,
+            letterSpacing: '-0.03em',
+            color: 'var(--text-primary)',
+            marginBottom: '0.75rem',
           }}>
-            Historie retušování
+            Vaše fotografie
           </h1>
-          <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
-            Přehled všech upravených a zakoupených fotografií.
+          <p style={{
+            fontSize: '1.05rem',
+            color: 'var(--text-secondary)',
+            fontWeight: 500,
+          }}>
+            {filteredOrders.length} {filteredOrders.length === 1 ? 'fotografie' : 'fotografií'}
           </p>
         </div>
 
+        {/* Controls */}
         <div style={{
-          display: 'flex', gap: '0.75rem', marginBottom: '2rem',
-          flexWrap: 'wrap' as const, alignItems: 'center',
+          display: 'flex',
+          gap: '1.5rem',
+          marginBottom: '3rem',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
         }}>
-          <a href="/#editor" className="btn btn-primary" style={{ fontSize: 13, padding: '8px 20px' }}>
-            + Nahrát nové fotografie
-          </a>
-          {orders.some(o => new Date(o.expires_at) < new Date()) && (
-            <button
-              onClick={handleDeleteExpired}
-              className="btn"
-              style={{ fontSize: 13, padding: '8px 20px', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' as const }}>
+            <a
+              href="/#editor"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '12px 32px',
+                background: 'var(--accent)',
+                color: '#000',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 15,
+                fontWeight: 700,
+                transition: 'all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                textDecoration: 'none',
+                fontFamily: 'inherit',
+                boxShadow: '0 10px 32px rgba(var(--accent-rgb, 100, 200, 255), 0.3)',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-6px)';
+                (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 16px 48px rgba(var(--accent-rgb, 100, 200, 255), 0.4)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)';
+                (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 10px 32px rgba(var(--accent-rgb, 100, 200, 255), 0.3)';
+              }}
             >
-              Smazat vypršené ({orders.filter(o => new Date(o.expires_at) < new Date()).length})
-            </button>
-          )}
-        </div>
-
-        {orders.length === 0 ? (
-          <div style={{
-            border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-            padding: '4rem 2rem', textAlign: 'center' as const, background: 'var(--bg-card)',
-          }}>
-            <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-              Zatím žádné fotografie
-            </p>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              Nahrajte první fotografii a vyzkoušejte AI retušování.
-            </p>
+              <span>+</span> Nahrát
+            </a>
+            {orders.some(o => new Date(o.expires_at) < new Date()) && (
+              <button
+                onClick={handleDeleteExpired}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '12px 28px',
+                  background: 'transparent',
+                  color: '#ef4444',
+                  border: '2px solid currentColor',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontSize: 15,
+                  fontWeight: 700,
+                  transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                  fontFamily: 'inherit',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239, 68, 68, 0.1)';
+                  (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-3px)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                  (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+                }}
+              >
+                Smazat vypršené ({orders.filter(o => new Date(o.expires_at) < new Date()).length})
+              </button>
+            )}
           </div>
-        ) : (
-          <>
-            <div className="dashboard-filters" style={{
-              display: 'flex', gap: '0.75rem', marginBottom: '1.5rem',
-              flexWrap: 'wrap' as const, alignItems: 'center',
-            }}>
+
+          {orders.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' as const }}>
               <input
                 type="text"
-                placeholder="Hledat podle názvu..."
+                placeholder="Hledat..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 style={{
-                  flex: 1, minWidth: 0, width: '100%',
-                  padding: '0.5rem 0.75rem',
+                  padding: '10px 16px',
                   background: 'var(--bg-secondary)',
                   border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)',
+                  borderRadius: 6,
                   color: 'var(--text-primary)',
-                  fontSize: 13, fontFamily: 'inherit', outline: 'none',
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                  transition: 'all 0.3s ease',
+                }}
+                onFocus={e => {
+                  e.currentTarget.style.borderColor = 'var(--accent)';
+                  e.currentTarget.style.boxShadow = '0 0 0 3px rgba(var(--accent-rgb, 100, 200, 255), 0.1)';
+                }}
+                onBlur={e => {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.boxShadow = 'none';
                 }}
               />
-              <select value={filter} onChange={e => setFilter(e.target.value as typeof filter)} className="select">
+              <select
+                value={filter}
+                onChange={e => setFilter(e.target.value as typeof filter)}
+                style={{
+                  padding: '10px 14px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text-primary)',
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLSelectElement).style.borderColor = 'var(--accent)';
+                  (e.currentTarget as HTMLSelectElement).style.boxShadow = '0 0 0 3px rgba(var(--accent-rgb, 100, 200, 255), 0.1)';
+                  (e.currentTarget as HTMLSelectElement).style.background = 'var(--bg)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLSelectElement).style.borderColor = 'var(--border)';
+                  (e.currentTarget as HTMLSelectElement).style.boxShadow = 'none';
+                  (e.currentTarget as HTMLSelectElement).style.background = 'var(--bg-secondary)';
+                }}
+              >
                 <option value="all">Všechny</option>
                 <option value="paid">Zaplacené</option>
                 <option value="pending">Čekající</option>
               </select>
-              <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} className="select">
+              <select
+                value={sort}
+                onChange={e => setSort(e.target.value as typeof sort)}
+                style={{
+                  padding: '10px 14px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text-primary)',
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLSelectElement).style.borderColor = 'var(--accent)';
+                  (e.currentTarget as HTMLSelectElement).style.boxShadow = '0 0 0 3px rgba(var(--accent-rgb, 100, 200, 255), 0.1)';
+                  (e.currentTarget as HTMLSelectElement).style.background = 'var(--bg)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLSelectElement).style.borderColor = 'var(--border)';
+                  (e.currentTarget as HTMLSelectElement).style.boxShadow = 'none';
+                  (e.currentTarget as HTMLSelectElement).style.background = 'var(--bg-secondary)';
+                }}
+              >
                 <option value="newest">Nejnovější</option>
                 <option value="oldest">Nejstarší</option>
                 <option value="price">Cena</option>
               </select>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' as const }}>
-                {filteredOrders.length} {filteredOrders.length === 1 ? 'fotografie' : 'fotografií'}
-              </span>
             </div>
+          )}
+        </div>
 
-            {filteredOrders.length === 0 ? (
-              <div style={{
-                border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                padding: '3rem 2rem', textAlign: 'center' as const, background: 'var(--bg-card)',
-              }}>
-                <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
-                  Žádné výsledky pro zadané filtry.
-                </p>
-                <button
-                  onClick={() => { setFilter('all'); setSearch(''); setSort('newest'); }}
-                  className="btn"
-                  style={{ marginTop: '1rem', fontSize: 13 }}
-                >
-                  Zrušit filtry
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* Desktop tabulka */}
-                <div className="dashboard-table" style={{
-                  border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden',
-                }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ background: 'var(--bg-secondary)' }}>
-                        {['Soubor', 'Datum', 'Cena', 'Stav', 'Vyprší za', 'Akce'].map(h => (
-                          <th key={h} style={{
-                            textAlign: 'left' as const, padding: '0.65rem 1rem',
-                            fontWeight: 600, fontSize: 11, letterSpacing: '0.08em',
-                            textTransform: 'uppercase' as const,
-                            color: 'var(--text-muted)', borderBottom: '1px solid var(--border)',
-                          }}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginatedOrders.map((order, i) => {
-                        const expired = new Date(order.expires_at) < new Date();
-                        const countdown = getCountdown(order.expires_at);
-                        return (
-                          <tr key={order.id} style={{
-                            borderBottom: i < paginatedOrders.length - 1 ? '1px solid var(--border)' : 'none',
-                            background: 'var(--bg)',
-                          }}>
-                            <td style={{ padding: '0.75rem 1rem', maxWidth: 240 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                <div
-                                  onClick={() => setLightbox(`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=80`)}
-                                  style={{
-                                    width: 52, height: 40, borderRadius: 4, overflow: 'hidden',
-                                    background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-                                    flexShrink: 0, cursor: 'zoom-in',
-                                  }}
-                                >
-                                  <img
-                                    src={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=60`}
-                                    alt={order.filename}
-                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                  />
-                                </div>
-                                <p style={{
-                                  overflow: 'hidden', textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap' as const, color: 'var(--text-primary)',
-                                }}>
-                                  {order.filename && !order.filename.match(/^[0-9a-f-]{36}/)
-                                    ? order.filename
-                                    : <span style={{
-                                      fontSize: 11, fontWeight: 600, color: 'var(--accent)',
-                                      background: 'var(--accent-muted)', border: '1px solid var(--accent-glow)',
-                                      borderRadius: 999, padding: '2px 8px',
-                                    }}>Bez názvu</span>
-                                  }
-                                </p>
-                              </div>
-                            </td>
+        {/* Empty State */}
+        {orders.length === 0 ? (
+          <div style={{
+            textAlign: 'center' as const,
+            padding: '4rem 2rem',
+          }}>
+            <div style={{ fontSize: 64, marginBottom: '1.5rem', opacity: 0.5 }}>📷</div>
+            <h2 style={{
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              color: 'var(--text-primary)',
+              marginBottom: '0.5rem',
+            }}>
+              Zatím žádné fotografie
+            </h2>
+            <p style={{
+              fontSize: '1rem',
+              color: 'var(--text-secondary)',
+              marginBottom: '2rem',
+            }}>
+              Začněte nahráváním první fotografie
+            </p>
+            <a
+              href="/#editor"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '12px 32px',
+                background: 'var(--accent)',
+                color: '#000',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 15,
+                fontWeight: 700,
+                textDecoration: 'none',
+                fontFamily: 'inherit',
+                transition: 'all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-6px)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)';
+              }}
+            >
+              Nahrát fotografie
+            </a>
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div style={{
+            textAlign: 'center' as const,
+            padding: '3rem 2rem',
+          }}>
+            <p style={{
+              fontSize: '1rem',
+              color: 'var(--text-secondary)',
+              marginBottom: '1.5rem',
+            }}>
+              Žádné fotografie neodpovídají hledaným kritériím
+            </p>
+            <button
+              onClick={() => { setFilter('all'); setSearch(''); setSort('newest'); }}
+              style={{
+                padding: '10px 28px',
+                fontSize: 14,
+                fontWeight: 600,
+                background: 'var(--accent)',
+                color: '#000',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+              }}
+            >
+              Zrušit filtry
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Grid */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+              gap: '1.5rem',
+              marginBottom: '2rem',
+            }}>
+              {paginatedOrders.map((order, idx) => {
+                const expired = new Date(order.expires_at) < new Date();
+                const countdown = getCountdown(order.expires_at);
+                const isPaid = order.payment_status === 'paid';
 
-                            <td style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' as const }}>
-                              {new Date(order.created_at).toLocaleDateString('cs-CZ')}
-                            </td>
+                return (
+                  <div
+                    key={order.id}
+                    style={{
+                      borderRadius: 12,
+                      border: '1px solid var(--border)',
+                      overflow: 'hidden',
+                      background: 'var(--bg-card)',
+                      transition: 'all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                      transform: 'translateZ(0)',
+                      cursor: 'default',
+                      animation: `slideUp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${idx * 0.05}s both`,
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+                    }}
+                    onMouseEnter={e => {
+                      (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-8px)';
+                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 16px 32px rgba(0, 0, 0, 0.16)';
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
+                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+                    }}
+                  >
+                    {/* Image */}
+                    <div
+                      onClick={() => setLightbox(`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=80`)}
+                      style={{
+                        position: 'relative',
+                        width: '100%',
+                        paddingBottom: '100%',
+                        background: 'var(--bg-secondary)',
+                        cursor: 'zoom-in',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <img
+                        src={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=60`}
+                        alt={order.filename}
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          transition: 'transform 0.4s ease-out',
+                        }}
+                        onMouseEnter={e => {
+                          (e.target as HTMLImageElement).style.transform = 'scale(1.08)';
+                        }}
+                        onMouseLeave={e => {
+                          (e.target as HTMLImageElement).style.transform = 'scale(1)';
+                        }}
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    </div>
 
-                            <td style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)' }}>
-                              {order.amount_czk} Kč
-                            </td>
-
-                            <td style={{ padding: '0.75rem 1rem' }}>
-                              <span style={{
-                                fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-                                textTransform: 'uppercase' as const,
-                                color: order.payment_status === 'paid' ? 'var(--progress-done)' : 'var(--text-muted)',
-                                background: order.payment_status === 'paid' ? 'rgba(74,222,128,0.08)' : 'var(--accent-muted)',
-                                padding: '2px 8px', borderRadius: 999,
-                              }}>
-                                {order.payment_status === 'paid' ? 'Zaplaceno' :
-                                  order.payment_status === 'pending' ? 'Ke koupi' : 'Čeká'}
-                              </span>
-                            </td>
-
-                            <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' as const }}>
-                              {order.payment_status === 'paid' ? (
-                                expired
-                                  ? <span style={{ fontSize: 12, color: '#ef4444' }}>Vypršelo</span>
-                                  : <span style={{ fontSize: 12, color: countdown && countdown.startsWith('0h') ? '#f97316' : 'var(--text-muted)' }}>{countdown}</span>
-                              ) : expired
-                                ? <span style={{ fontSize: 12, color: '#ef4444' }}>Vypršelo</span>
-                                : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>
-                              }
-                            </td>
-
-                            <td style={{ padding: '0.75rem 1rem' }}>
-                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                {order.payment_status === 'paid' && !expired ? (
-                                  <a
-                                    href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
-                                    download={order.filename && !order.filename.match(/^[0-9a-f-]{36}/)
-                                      ? `enhanced_${order.filename}`
-                                      : `foto_${new Date(order.created_at).toISOString().slice(0, 10)}_${order.image_id.slice(0, 8)}.jpg`
-                                    }
-                                    className="btn btn-primary"
-                                    style={{ padding: '4px 12px', fontSize: 12 }}
-                                  >
-                                    Stáhnout
-                                  </a>
-                                ) : order.payment_status === 'pending' && !expired ? (
-                                  <button
-                                    onClick={() => handleBuy(order)}
-                                    className="btn btn-primary"
-                                    style={{ padding: '4px 12px', fontSize: 12 }}
-                                  >
-                                    Koupit — 59 Kč
-                                  </button>
-                                ) : (
-                                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                                    {expired ? 'Vypršelo' : '—'}
-                                  </span>
-                                )}
-                                {(expired || order.payment_status === 'pending') && (
-                                  <button
-                                    onClick={() => handleDelete(order.id)}
-                                    style={{
-                                      background: 'none', border: 'none',
-                                      color: 'var(--text-muted)', cursor: 'pointer',
-                                      fontSize: 16, padding: '2px 6px', borderRadius: 4,
-                                    }}
-                                    onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
-                                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-muted)')}
-                                    title="Smazat záznam"
-                                  >
-                                    ✕
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Mobilní karty */}
-                <div className="dashboard-cards">
-                  {paginatedOrders.map((order) => {
-                    const expired = new Date(order.expires_at) < new Date();
-                    const countdown = getCountdown(order.expires_at);
-                    return (
-                      <div key={order.id} style={{
-                        border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                        background: 'var(--bg-card)', padding: '1rem',
-                        display: 'flex', flexDirection: 'column' as const, gap: '0.75rem',
+                    {/* Content */}
+                    <div style={{ padding: '1rem' }}>
+                      {/* Filename */}
+                      <p style={{
+                        fontSize: '0.875rem',
+                        fontWeight: 600,
+                        color: 'var(--text-primary)',
+                        marginBottom: '0.75rem',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
                       }}>
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                          <div
-                            onClick={() => setLightbox(`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=80`)}
+                        {order.filename && !order.filename.match(/^[0-9a-f-]{36}/)
+                          ? order.filename
+                          : 'Bez názvu'}
+                      </p>
+
+                      {/* Meta */}
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '1rem',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-secondary)',
+                      }}>
+                        <span>{new Date(order.created_at).toLocaleDateString('cs-CZ')}</span>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{order.amount_czk} Kč</span>
+                      </div>
+
+                      {/* Status Badge */}
+                      <div className="status-row" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '4px 10px',
+                          borderRadius: 6,
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.05em',
+                          background: isPaid
+                            ? 'rgba(74, 222, 128, 0.15)'
+                            : order.payment_status === 'pending'
+                              ? 'rgba(251, 146, 60, 0.15)'
+                              : 'rgba(var(--text-muted-rgb, 100, 100, 100), 0.1)',
+                          color: isPaid
+                            ? '#4ade80'
+                            : order.payment_status === 'pending'
+                              ? '#fb923c'
+                              : 'var(--text-muted)',
+                          border: '1px solid',
+                          borderColor: isPaid
+                            ? 'rgba(74, 222, 128, 0.3)'
+                            : order.payment_status === 'pending'
+                              ? 'rgba(251, 146, 60, 0.3)'
+                              : 'rgba(var(--text-muted-rgb, 100, 100, 100), 0.2)',
+                        }}>
+                          {isPaid ? '✓ Zaplaceno' : order.payment_status === 'pending' ? '⏳ Ke koupi' : '○ Čeká'}
+                        </span>
+                        {countdown && (
+                          <div style={{
+                            fontSize: '0.75rem',
+                            color: expired ? '#ef4444' : countdown.startsWith('0h') ? '#f97316' : 'var(--text-muted)',
+                            fontWeight: 500,
+                          }}>
+                            {expired ? 'Vypršelo' : `Vyprší za ${countdown}`}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{
+                        display: 'flex',
+                        gap: '0.5rem',
+                        flexWrap: 'wrap',
+                      }}>
+                        {isPaid && !expired ? (
+                          <a
+                            href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
+                            download={order.filename && !order.filename.match(/^[0-9a-f-]{36}/)
+                              ? `enhanced_${order.filename}`
+                              : `foto_${new Date(order.created_at).toISOString().slice(0, 10)}_${order.image_id.slice(0, 8)}.jpg`
+                            }
                             style={{
-                              width: 56, height: 44, borderRadius: 6, overflow: 'hidden', flexShrink: 0,
-                              background: 'var(--bg-secondary)', border: '1px solid var(--border)', cursor: 'zoom-in',
+                              flex: 1,
+                              textAlign: 'center',
+                              padding: '9px 12px',
+                              background: 'var(--accent)',
+                              color: '#000',
+                              border: 'none',
+                              borderRadius: 6,
+                              cursor: 'pointer',
+                              fontSize: '0.875rem',
+                              fontWeight: 700,
+                              textDecoration: 'none',
+                              transition: 'all 0.3s ease',
+                              display: 'block',
+                              fontFamily: 'inherit',
+                            }}
+                            onMouseEnter={e => {
+                              (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)';
+                              (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 8px 16px rgba(var(--accent-rgb, 100, 200, 255), 0.3)';
+                            }}
+                            onMouseLeave={e => {
+                              (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)';
+                              (e.currentTarget as HTMLAnchorElement).style.boxShadow = 'none';
                             }}
                           >
-                            <img
-                              src={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=60`}
-                              alt={order.filename}
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                            />
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{
-                              fontSize: 13, fontWeight: 500, color: 'var(--text-primary)',
-                              overflow: 'hidden', textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap' as const, marginBottom: 4,
-                            }}>
-                              {order.filename && !order.filename.match(/^[0-9a-f-]{36}/)
-                                ? order.filename
-                                : <span style={{
-                                  fontSize: 11, fontWeight: 600, color: 'var(--accent)',
-                                  background: 'var(--accent-muted)', border: '1px solid var(--accent-glow)',
-                                  borderRadius: 999, padding: '2px 8px',
-                                }}>Bez názvu</span>
-                              }
-                            </p>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
-                              <span style={{
-                                fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-                                textTransform: 'uppercase' as const,
-                                color: order.payment_status === 'paid' ? 'var(--progress-done)' : 'var(--text-muted)',
-                                background: order.payment_status === 'paid' ? 'rgba(74,222,128,0.08)' : 'var(--accent-muted)',
-                                padding: '2px 8px', borderRadius: 999,
-                              }}>
-                                {order.payment_status === 'paid' ? 'Zaplaceno' : order.payment_status === 'pending' ? 'Ke koupi' : 'Čeká'}
-                              </span>
-                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                {new Date(order.created_at).toLocaleDateString('cs-CZ')}
-                              </span>
-                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                {order.amount_czk} Kč
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          borderTop: '1px solid var(--border)', paddingTop: '0.75rem',
-                          gap: 8, flexWrap: 'wrap' as const,
-                        }}>
-                          <span style={{ fontSize: 12, color: expired ? '#ef4444' : 'var(--text-muted)', flexShrink: 0 }}>
-                            {order.payment_status === 'paid'
-                              ? expired ? 'Vypršelo' : `Vyprší za ${countdown}`
-                              : expired ? 'Vypršelo' : '—'
-                            }
-                          </span>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
-                            {order.payment_status === 'paid' && !expired ? (
-                              <a
-                                href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
-                                download={order.filename && !order.filename.match(/^[0-9a-f-]{36}/)
-                                  ? `enhanced_${order.filename}`
-                                  : `foto_${new Date(order.created_at).toISOString().slice(0, 10)}_${order.image_id.slice(0, 8)}.jpg`
-                                }
-                                className="btn btn-primary"
-                                style={{ padding: '6px 14px', fontSize: 12 }}
-                              >
-                                Stáhnout
-                              </a>
-                            ) : order.payment_status === 'pending' && !expired ? (
-                              <button
-                                onClick={() => handleBuy(order)}
-                                className="btn btn-primary"
-                                style={{ padding: '6px 14px', fontSize: 12, whiteSpace: 'nowrap' as const }}
-                              >
-                                Koupit 59 Kč
-                              </button>
-                            ) : null}
-                            {(expired || order.payment_status === 'pending') && (
-                              <button
-                                onClick={() => handleDelete(order.id)}
-                                style={{
-                                  background: 'rgba(239,68,68,0.08)',
-                                  border: '1px solid rgba(239,68,68,0.2)',
-                                  color: '#ef4444', cursor: 'pointer',
-                                  fontSize: 12, padding: '6px 10px', borderRadius: 6, flexShrink: 0,
-                                }}
-                              >
-                                Smazat
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                            Stáhnout
+                          </a>
+                        ) : order.payment_status === 'pending' && !expired ? (
+                          <button
+                            onClick={() => handleBuy(order)}
+                            style={{
+                              flex: 1,
+                              padding: '9px 12px',
+                              background: 'var(--accent)',
+                              color: '#000',
+                              border: 'none',
+                              borderRadius: 6,
+                              cursor: 'pointer',
+                              fontSize: '0.875rem',
+                              fontWeight: 700,
+                              transition: 'all 0.3s ease',
+                              fontFamily: 'inherit',
+                            }}
+                            onMouseEnter={e => {
+                              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
+                              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 8px 16px rgba(var(--accent-rgb, 100, 200, 255), 0.3)';
+                            }}
+                            onMouseLeave={e => {
+                              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+                              (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none';
+                            }}
+                          >
+                            Koupit
+                          </button>
+                        ) : null}
+                        {(expired || order.payment_status === 'pending') && (
+                          <button
+                            onClick={() => handleDelete(order.id)}
+                            style={{
+                              flex: 1,
+                              padding: '9px 12px',
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              color: '#ef4444',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              borderRadius: 6,
+                              cursor: 'pointer',
+                              fontSize: '0.875rem',
+                              fontWeight: 700,
+                              transition: 'all 0.3s ease',
+                              fontFamily: 'inherit',
+                            }}
+                            onMouseEnter={e => {
+                              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239, 68, 68, 0.2)';
+                              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
+                            }}
+                            onMouseLeave={e => {
+                              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239, 68, 68, 0.1)';
+                              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+                            }}
+                          >
+                            🗑 Smazat
+                          </button>
+                        )}
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
-                {/* Stránkování */}
-                {totalPages > 1 && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    gap: '0.5rem', marginTop: '1.5rem',
-                  }}>
-                    <button
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={page === 1}
-                      className="btn"
-                      style={{ fontSize: 12, padding: '4px 12px', opacity: page === 1 ? 0.4 : 1 }}
-                    >
-                      ← Předchozí
-                    </button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                padding: '2rem 0',
+                flexWrap: 'wrap',
+              }}>
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  style={{
+                    padding: '9px 16px',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    background: page === 1 ? 'var(--bg-secondary)' : 'var(--bg)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: page === 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                    cursor: page === 1 ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.3s ease',
+                    opacity: page === 1 ? 0.5 : 1,
+                    fontFamily: 'inherit',
+                  }}
+                  onMouseEnter={e => {
+                    if (page !== 1) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)';
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)';
+                  }}
+                >
+                  ← Předchozí
+                </button>
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => Math.abs(p - page) <= 2 || p === 1 || p === totalPages)
+                  .map((p, idx, arr) => (
+                    <div key={p}>
+                      {idx > 0 && arr[idx - 1] !== p - 1 && <span style={{ color: 'var(--text-muted)' }}>…</span>}
                       <button
-                        key={p}
                         onClick={() => setPage(p)}
-                        className="btn"
                         style={{
-                          fontSize: 12, padding: '4px 10px',
-                          background: p === page ? 'var(--accent)' : 'transparent',
+                          padding: '9px 14px',
+                          fontSize: 14,
+                          fontWeight: p === page ? 700 : 600,
+                          background: p === page ? 'var(--accent)' : 'var(--bg)',
                           color: p === page ? '#000' : 'var(--text-secondary)',
+                          border: '1px solid',
                           borderColor: p === page ? 'var(--accent)' : 'var(--border)',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease',
+                          fontFamily: 'inherit',
+                        }}
+                        onMouseEnter={e => {
+                          if (p !== page) {
+                            (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)';
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (p !== page) {
+                            (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)';
+                          }
                         }}
                       >
                         {p}
                       </button>
-                    ))}
-                    <button
-                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                      disabled={page === totalPages}
-                      className="btn"
-                      style={{ fontSize: 12, padding: '4px 12px', opacity: page === totalPages ? 0.4 : 1 }}
-                    >
-                      Další →
-                    </button>
-                  </div>
-                )}
-              </>
+                    </div>
+                  ))}
+
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  style={{
+                    padding: '9px 16px',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    background: page === totalPages ? 'var(--bg-secondary)' : 'var(--bg)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: page === totalPages ? 'var(--text-muted)' : 'var(--text-primary)',
+                    cursor: page === totalPages ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.3s ease',
+                    opacity: page === totalPages ? 0.5 : 1,
+                    fontFamily: 'inherit',
+                  }}
+                  onMouseEnter={e => {
+                    if (page !== totalPages) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-secondary)';
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)';
+                  }}
+                >
+                  Další →
+                </button>
+              </div>
             )}
           </>
         )}
@@ -551,29 +752,119 @@ export default function DashboardPage() {
 
       {/* Lightbox */}
       {lightbox && (
-        <div onClick={() => setLightbox(null)} style={{
-          position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(0,0,0,0.92)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'zoom-out',
-        }}>
-          <img src={lightbox} alt="Náhled" style={{
-            maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 4,
-          }} />
-          <button onClick={() => setLightbox(null)} style={{
-            position: 'fixed', top: 20, right: 24,
-            background: 'none', border: 'none',
-            color: '#fff', fontSize: 24, cursor: 'pointer',
-          }}>✕</button>
+        <div
+          onClick={() => setLightbox(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(0, 0, 0, 0.95)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'zoom-out',
+            animation: 'fadeIn 0.3s ease-out',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <img
+            src={lightbox}
+            alt="Náhled"
+            style={{
+              maxWidth: '90vw',
+              maxHeight: '90vh',
+              objectFit: 'contain',
+              borderRadius: 12,
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.4)',
+              animation: 'zoomIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            }}
+          />
+          <button
+            onClick={() => setLightbox(null)}
+            style={{
+              position: 'fixed',
+              top: 28,
+              right: 32,
+              width: 44,
+              height: 44,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(255, 255, 255, 0.15)',
+              border: '1.5px solid rgba(255, 255, 255, 0.25)',
+              borderRadius: '50%',
+              color: '#fff',
+              fontSize: 24,
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              backdropFilter: 'blur(8px)',
+              fontFamily: 'inherit',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.25)';
+              (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.15)';
+              (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
 
       <style>{`
-        .dashboard-table { display: table; width: 100%; }
-        .dashboard-cards { display: none; }
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            backdrop-filter: blur(0px);
+          }
+          to {
+            opacity: 1;
+            backdrop-filter: blur(4px);
+          }
+        }
+
+        @keyframes zoomIn {
+          from {
+            opacity: 0;
+            transform: scale(0.92);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+
+        select {
+          appearance: none;
+          background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+          background-repeat: no-repeat;
+          background-position: right 0.75rem center;
+          background-size: 1rem;
+          padding-right: 2.5rem;
+        }
+
         @media (max-width: 768px) {
-          .dashboard-table { display: none !important; }
-          .dashboard-cards { display: flex !important; flex-direction: column; gap: 0.75rem; }
+          div[style*="grid-template-columns"] {
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important;
+          }
+          .status-row {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+          }
         }
       `}</style>
     </main>
