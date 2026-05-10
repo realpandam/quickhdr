@@ -430,6 +430,7 @@ router.get('/cron/expiry-reminders', async (req: Request, res: Response) => {
 // ── Autoenhance Webhook ───────────────────────────────────────────────────────
 // Autoenhance volá tento endpoint po dokončení zpracování každé fotky
 router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
+  console.log('WEBHOOK:', JSON.stringify({ event: req.body.event, image_id: req.body.image_id, order_id: req.body.order_id }));
   // Odpověz okamžitě — Autoenhance čeká max 5s
   res.status(200).json({ ok: true });
 
