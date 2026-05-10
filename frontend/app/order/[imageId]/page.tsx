@@ -14,13 +14,15 @@ export default function OrderPage() {
   const [enhancedUrl, setEnhancedUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
 
+  const isHdr = imageId?.startsWith('hdr_pending_');
+  const orderId = isHdr ? imageId.replace('hdr_pending_', '') : null;
+
   useEffect(() => {
     if (!imageId) return;
 
     let progressInterval: ReturnType<typeof setInterval>;
     let pollInterval: ReturnType<typeof setInterval>;
 
-    // Animovaný progress bar — roste pomalu do 90%
     progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 90) return prev;
@@ -28,9 +30,28 @@ export default function OrderPage() {
       });
     }, 1000);
 
-    // Polling každé 3s
     pollInterval = setInterval(async () => {
       try {
+        // ── HDR polling ──
+        if (isHdr && orderId) {
+          const res = await fetch(`${API_URL}/api/enhance/hdr/order/${orderId}/status`);
+          const { is_merging, is_processing, image_ids } = await res.json();
+
+          const done = !is_merging && !is_processing && image_ids?.length > 0;
+
+          if (done) {
+            clearInterval(pollInterval);
+            clearInterval(progressInterval);
+            setProgress(100);
+            setEnhancedUrl(`${API_URL}/api/enhance/enhanced/${image_ids[0]}`);
+            setStatus('done');
+          } else {
+            setStatus('processing');
+          }
+          return;
+        }
+
+        // ── Non-HDR polling ──
         const res = await fetch(`${API_URL}/api/enhance/status/${imageId}`);
         const { status: apiStatus } = await res.json();
 
@@ -58,7 +79,7 @@ export default function OrderPage() {
       clearInterval(pollInterval);
       clearInterval(progressInterval);
     };
-  }, [imageId]);
+  }, [imageId, isHdr, orderId]);
 
   const handleBuy = async () => {
     try {
@@ -80,8 +101,22 @@ export default function OrderPage() {
   };
 
   return (
-    <main style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-      <a href="/" style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: '3rem', textDecoration: 'none' }}>
+    <main style={{
+      minHeight: '100vh',
+      background: 'var(--bg)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '2rem',
+    }}>
+      <a href="/" style={{
+        fontSize: 14,
+        fontWeight: 700,
+        color: 'var(--text-primary)',
+        marginBottom: '3rem',
+        textDecoration: 'none',
+      }}>
         FASTHDR
       </a>
 
@@ -89,45 +124,139 @@ export default function OrderPage() {
 
         {(status === 'loading' || status === 'processing') && (
           <>
-            <div style={{ width: '100%', height: 4, background: 'var(--border)', borderRadius: 999, overflow: 'hidden', marginBottom: '2rem' }}>
-              <div style={{ height: '100%', width: `${progress}%`, background: 'var(--accent)', borderRadius: 999, transition: 'width 1s ease' }} />
+            <div style={{
+              width: '100%',
+              height: 4,
+              background: 'var(--border)',
+              borderRadius: 999,
+              overflow: 'hidden',
+              marginBottom: '2rem',
+            }}>
+              <div style={{
+                height: '100%',
+                width: `${progress}%`,
+                background: 'var(--accent)',
+                borderRadius: 999,
+                transition: 'width 1s ease',
+              }} />
             </div>
-            <div style={{ width: 48, height: 48, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 1.5rem', animation: 'spin 1s linear infinite' }} />
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+
+            <div style={{
+              width: 48,
+              height: 48,
+              border: '3px solid var(--border)',
+              borderTop: '3px solid var(--accent)',
+              borderRadius: '50%',
+              margin: '0 auto 1.5rem',
+              animation: 'spin 1s linear infinite',
+            }} />
+
+            <h2 style={{
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              color: 'var(--text-primary)',
+              marginBottom: '0.5rem',
+            }}>
               Zpracováváme vaši fotografii…
             </h2>
-            <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '2rem' }}>
+
+            <p style={{
+              fontSize: 14,
+              color: 'var(--text-muted)',
+              lineHeight: 1.6,
+              marginBottom: '2rem',
+            }}>
               AI zpracování obvykle trvá 1–3 minuty.<br />
               Tuto stránku neopouštějte — výsledek se zobrazí automaticky.
             </p>
-            <div style={{ padding: '1rem', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              💡 <a href="/login" style={{ color: 'var(--accent)' }}>Přihlaste se</a> a výsledky se vám uloží do Moje fotografie — nebudete muset čekat na stránce.
+
+            <div style={{
+              padding: '1rem',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              fontSize: 13,
+              color: 'var(--text-muted)',
+              lineHeight: 1.6,
+            }}>
+              💡 <a href="/login" style={{ color: 'var(--accent)' }}>Přihlaste se</a> a výsledky
+              se vám uloží do Moje fotografie — nebudete muset čekat na stránce.
             </div>
           </>
         )}
 
         {status === 'done' && enhancedUrl && (
           <>
-            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 1.5rem' }}>
+            <div style={{
+              width: 56,
+              height: 56,
+              borderRadius: '50%',
+              background: 'rgba(74,222,128,0.15)',
+              border: '1px solid rgba(74,222,128,0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 24,
+              margin: '0 auto 1.5rem',
+            }}>
               ✓
             </div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+
+            <h2 style={{
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              color: 'var(--text-primary)',
+              marginBottom: '0.5rem',
+            }}>
               Fotografie je připravena!
             </h2>
-            <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: '1.5rem', lineHeight: 1.6 }}>
-              Níže vidíte náhled s vodoznakem. Pro stažení v plném rozlišení bez vodoznaku dokončete platbu.
+
+            <p style={{
+              fontSize: 14,
+              color: 'var(--text-muted)',
+              marginBottom: '1.5rem',
+              lineHeight: 1.6,
+            }}>
+              Níže vidíte náhled s vodoznakem. Pro stažení v plném rozlišení
+              bez vodoznaku dokončete platbu.
             </p>
-            <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: '1.5rem' }}>
-              <img src={enhancedUrl} alt="Upravená fotografie" style={{ width: '100%', display: 'block' }} />
+
+            <div style={{
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              overflow: 'hidden',
+              marginBottom: '1.5rem',
+            }}>
+              <img
+                src={enhancedUrl}
+                alt="Upravená fotografie"
+                style={{ width: '100%', display: 'block' }}
+              />
             </div>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
-              <button onClick={handleBuy} className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14 }}>
+
+            <div style={{
+              display: 'flex',
+              gap: '0.75rem',
+              justifyContent: 'center',
+              flexWrap: 'wrap',
+              marginBottom: '1rem',
+            }}>
+              <button
+                onClick={handleBuy}
+                className="btn btn-primary"
+                style={{ padding: '10px 24px', fontSize: 14 }}
+              >
                 Koupit & Stáhnout — 59 Kč
               </button>
-              <a href="/" className="btn" style={{ padding: '10px 24px', fontSize: 14 }}>
+              <a
+                href="/"
+                className="btn"
+                style={{ padding: '10px 24px', fontSize: 14 }}
+              >
                 Zpracovat další fotografii
               </a>
             </div>
+
             <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
               Fotografie je dostupná po dobu 7 dní.{' '}
               <a href="/login" style={{ color: 'var(--accent)' }}>Přihlaste se</a>{' '}
@@ -138,18 +267,48 @@ export default function OrderPage() {
 
         {status === 'error' && (
           <>
-            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 1.5rem' }}>
+            <div style={{
+              width: 56,
+              height: 56,
+              borderRadius: '50%',
+              background: 'rgba(239,68,68,0.1)',
+              border: '1px solid rgba(239,68,68,0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 24,
+              margin: '0 auto 1.5rem',
+            }}>
               ✗
             </div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+
+            <h2 style={{
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              color: 'var(--text-primary)',
+              marginBottom: '0.5rem',
+            }}>
               Zpracování selhalo
             </h2>
-            <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: '2rem', lineHeight: 1.6 }}>
+
+            <p style={{
+              fontSize: 14,
+              color: 'var(--text-muted)',
+              marginBottom: '2rem',
+              lineHeight: 1.6,
+            }}>
               Omlouváme se, došlo k chybě při zpracování fotografie.<br />
               Zkuste to prosím znovu nebo nás kontaktujte na{' '}
-              <a href="mailto:info@fasthdr.cz" style={{ color: 'var(--accent)' }}>info@fasthdr.cz</a>.
+              <a href="mailto:info@fasthdr.cz" style={{ color: 'var(--accent)' }}>
+                info@fasthdr.cz
+              </a>.
             </p>
-            <a href="/" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14 }}>
+
+            <a
+              href="/"
+              className="btn btn-primary"
+              style={{ padding: '10px 24px', fontSize: 14 }}
+            >
               Zkusit znovu
             </a>
           </>
