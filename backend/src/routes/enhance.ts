@@ -117,15 +117,25 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
     });
 
     // Krok 3: Ihned ulož order do DB (asynchronní zpracování — webhook dorazí později)
-    await supabase.from('orders').insert({
+    const { error: insertError, data: insertData } = await supabase
+      .from('orders')
+      .insert({
+        image_id,
+        filename: file.originalname,
+        payment_status: 'pending',
+        amount_czk: 59,
+        user_id: user_id || null,
+        session_id: session_id || null,
+        payment_session_id: `pending_${image_id}`,
+      })
+      .select();
+
+    console.log('INSERT RESULT:', JSON.stringify({
       image_id,
-      filename: file.originalname,
-      payment_status: 'pending',
-      amount_czk: 59,
-      user_id: user_id || null,
-      session_id: session_id || null,
-      payment_session_id: `pending_${image_id}`,
-    });
+      user_id,
+      error: insertError?.message,
+      data: insertData
+    }));
 
     res.json({ image_id });
   } catch (error) {
@@ -249,7 +259,7 @@ router.post('/hdr/order', async (req: Request, res: Response) => {
 
     // Ulož HDR order do DB ihned — image_id přijde z webhookem
     // Používáme hdr_group_id = order_id pro propojení
-    await supabase.from('orders').insert({
+    const { error: insertError, data: insertData } = await supabase.from('orders').insert({
       image_id: `hdr_pending_${order_id}`, // placeholder — přepíše webhook
       filename: filename || null,
       payment_status: 'pending',
@@ -259,6 +269,13 @@ router.post('/hdr/order', async (req: Request, res: Response) => {
       hdr_order_id: order_id, // nový sloupec pro HDR
       payment_session_id: `pending_hdr_${order_id}`,
     });
+
+    console.log('HDR INSERT RESULT:', JSON.stringify({
+      image_id: `hdr_pending_${order_id}`,
+      user_id,
+      error: insertError?.message,
+      data: insertData
+    }));
 
     res.json({ order_id });
   } catch (error) {
