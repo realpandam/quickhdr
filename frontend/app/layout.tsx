@@ -26,8 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           __html: `
             (function() {
               const saved = localStorage.getItem('theme');
-              const preferred = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-              document.documentElement.setAttribute('data-theme', saved || preferred);
+              document.documentElement.setAttribute('data-theme', saved || 'dark');
             })();
           `
         }} />

@@ -33,18 +33,6 @@ const DEFAULT_SETTINGS: Settings = {
   hdr_brackets: 'auto',
 };
 
-const sendNotification = async (userId: string, filename: string, imageId: string) => {
-  try {
-    await fetch(`${API_URL}/api/enhance/notify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, filename, image_id: imageId }),
-    });
-  } catch {
-    // Notifikace není kritická — ignoruj chybu
-  }
-};
-
 // Získej nebo vytvoř session_id pro nepřihlášeného uživatele
 const getSessionId = (): string => {
   const key = 'fasthdr_session_id';
@@ -107,6 +95,8 @@ export default function ImageUploader() {
   }, [updatePhoto]);
 
   // ── Non-HDR upload ────────────────────────────────────────
+  // Přihlášený: upload → zobraz "Zpracovává se" → webhook pošle email → fotka v dashboardu
+  // Nepřihlášený: upload → přesměruj na /order/[imageId] s polling
   const processPhoto = useCallback(async (item: PhotoItem, currentSettings: Settings) => {
     updatePhoto(item.id, { status: 'uploading', progress: 0 });
     animateProgress(item.id, 0, 30, 800);
@@ -129,22 +119,50 @@ export default function ImageUploader() {
       if (!uploadRes.ok) throw new Error('Upload selhal');
       const { image_id } = await uploadRes.json();
 
+      // ── Nepřihlášený — přesměruj na order stránku s polling ──
       if (!user) {
-        // Nepřihlášený — přesměruj na order stránku s polling
         window.location.href = `/order/${image_id}`;
         return;
       }
 
-      // Přihlášený — polling + notifikace emailem
-      updatePhoto(item.id, { status: 'processing' });
-      animateProgress(item.id, 30, 85, 8000);
-      await pollStatus(item.id, image_id, item.file.name);
+      // ── Přihlášený — asynchronní flow ──
+      // Upload hotový → zobraz "Zpracovává se" a čekej na webhook
+      // Webhook pošle email a fotka se objeví v dashboardu
+      // Jako fallback polling zobrazí výsledek přímo v uploaderu
+      updatePhoto(item.id, { status: 'processing', progress: 50 });
+
+      // Fallback polling — pokud webhook selže, uživatel stále uvidí výsledek
+      const pollFallback = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/enhance/status/${image_id}`);
+          const { status } = await res.json();
+
+          if (status === 'processed') {
+            clearInterval(pollFallback);
+            updatePhoto(item.id, {
+              status: 'done', progress: 100,
+              enhancedUrl: `${API_URL}/api/enhance/enhanced/${image_id}`,
+            });
+          } else if (status === 'failed' || status === 'error') {
+            clearInterval(pollFallback);
+            updatePhoto(item.id, { status: 'error', error: 'AI zpracování selhalo', progress: 0 });
+          }
+        } catch {
+          clearInterval(pollFallback);
+        }
+      }, 3000);
+
+      // Timeout — po 10 minutách zastav polling
+      setTimeout(() => clearInterval(pollFallback), 10 * 60 * 1000);
+
     } catch {
       updatePhoto(item.id, { status: 'error', error: 'Zpracování selhalo', progress: 0 });
     }
   }, [updatePhoto, animateProgress]);
 
   // ── HDR upload ────────────────────────────────────────────
+  // Přihlášený: upload → zobraz "Zpracovává se" → webhook pošle email → fotka v dashboardu
+  // Nepřihlášený: upload → přesměruj na /order/hdr_pending_[order_id]
   const processHdrGroup = useCallback(async (
     items: PhotoItem[],
     currentSettings: Settings
@@ -155,7 +173,7 @@ export default function ImageUploader() {
       const { data: { user } } = await supabase.auth.getUser();
       const sessionId = getSessionId();
 
-      // Vytvoř HDR order — pošli user_id, session_id a filename prvního souboru
+      // Vytvoř HDR order
       const orderRes = await fetch(`${API_URL}/api/enhance/hdr/order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -199,16 +217,40 @@ export default function ImageUploader() {
         }),
       });
 
+      // ── Nepřihlášený — přesměruj na order stránku ──
       if (!user) {
-        // Nepřihlášený — přesměruj na order stránku
-        // Pro HDR použijeme order_id jako identifikátor — backend ho zná
         window.location.href = `/order/hdr_pending_${order_id}`;
         return;
       }
 
-      // Přihlášený — polling
-      items.forEach(it => updatePhoto(it.id, { status: 'processing', progress: 45 }));
-      await pollOrderStatus(order_id, items);
+      // ── Přihlášený — asynchronní flow ──
+      items.forEach(it => updatePhoto(it.id, { status: 'processing', progress: 50 }));
+
+      // Fallback polling pro HDR
+      const pollFallback = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/enhance/hdr/order/${order_id}/status`);
+          const { is_merging, is_processing, image_ids } = await res.json();
+
+          const done = !is_merging && !is_processing && image_ids?.length > 0;
+
+          if (done) {
+            clearInterval(pollFallback);
+            updatePhoto(items[0].id, {
+              status: 'done', progress: 100,
+              enhancedUrl: `${API_URL}/api/enhance/enhanced/${image_ids[0]}`,
+            });
+            items.slice(1).forEach(it => updatePhoto(it.id, {
+              status: 'done', progress: 100, enhancedUrl: null,
+            }));
+          }
+        } catch {
+          clearInterval(pollFallback);
+        }
+      }, 3000);
+
+      // Timeout — po 10 minutách zastav polling
+      setTimeout(() => clearInterval(pollFallback), 10 * 60 * 1000);
 
     } catch (err) {
       console.error(err);
@@ -217,81 +259,6 @@ export default function ImageUploader() {
       }));
     }
   }, [updatePhoto]);
-
-  const pollOrderStatus = (orderId: string, items: PhotoItem[]): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      let progressVal = 45;
-
-      const interval = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_URL}/api/enhance/hdr/order/${orderId}/status`);
-          const { is_merging, is_processing, image_ids } = await res.json();
-
-          if (progressVal < 90) {
-            progressVal += 1;
-            items.forEach(it => updatePhoto(it.id, { progress: progressVal }));
-          }
-
-          const done = !is_merging && !is_processing && image_ids?.length > 0;
-
-          if (done) {
-            clearInterval(interval);
-
-            updatePhoto(items[0].id, {
-              status: 'done', progress: 100,
-              enhancedUrl: `${API_URL}/api/enhance/enhanced/${image_ids[0]}`,
-            });
-            items.slice(1).forEach(it => updatePhoto(it.id, {
-              status: 'done', progress: 100, enhancedUrl: null,
-            }));
-
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-              await sendNotification(user.id, items[0].file.name, image_ids[0]);
-            }
-
-            resolve();
-          }
-        } catch {
-          clearInterval(interval);
-          items.forEach(it => updatePhoto(it.id, { status: 'error', error: 'Chyba sítě', progress: 0 }));
-          reject();
-        }
-      }, 3000);
-    });
-  };
-
-  const pollStatus = (photoId: string, imageId: string, filename: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const interval = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_URL}/api/enhance/status/${imageId}`);
-          const { status } = await res.json();
-          if (status === 'processed') {
-            clearInterval(interval);
-            updatePhoto(photoId, { progress: 95 });
-            setTimeout(async () => {
-              updatePhoto(photoId, {
-                status: 'done', progress: 100,
-                enhancedUrl: `${API_URL}/api/enhance/enhanced/${imageId}`,
-              });
-              const { data: { user } } = await supabase.auth.getUser();
-              if (user) await sendNotification(user.id, filename, imageId);
-              resolve();
-            }, 300);
-          } else if (status === 'failed') {
-            clearInterval(interval);
-            updatePhoto(photoId, { status: 'error', error: 'AI zpracování selhalo', progress: 0 });
-            reject();
-          }
-        } catch {
-          clearInterval(interval);
-          updatePhoto(photoId, { status: 'error', error: 'Chyba sítě', progress: 0 });
-          reject();
-        }
-      }, 2000);
-    });
-  };
 
   // ─── Checkout ─────────────────────────────────────────────
   const handleCheckout = async (photo: PhotoItem) => {
@@ -490,6 +457,7 @@ export default function ImageUploader() {
                     borderBottom: i < photos.length - 1 ? '1px solid var(--border)' : 'none',
                     background: 'var(--bg)',
                   }}>
+                    {/* Náhled */}
                     <td style={{ padding: '0.75rem 1rem' }}>
                       <div
                         onClick={() => photo.enhancedUrl ? setLightbox(photo.enhancedUrl) : undefined}
@@ -508,6 +476,7 @@ export default function ImageUploader() {
                       </div>
                     </td>
 
+                    {/* Soubor */}
                     <td style={{ padding: '0.75rem 1rem', maxWidth: 220 }}>
                       <p style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
                         {photo.file.name}
@@ -527,12 +496,14 @@ export default function ImageUploader() {
                       </p>
                     </td>
 
+                    {/* Stav */}
                     <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' as const }}>
                       <span style={{ color: statusColor[photo.status] }}>
                         {photo.error ?? statusLabel[photo.status]}
                       </span>
                     </td>
 
+                    {/* Progress */}
                     <td style={{ padding: '0.75rem 1rem', minWidth: 140 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1, height: 2, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
@@ -548,6 +519,7 @@ export default function ImageUploader() {
                       </div>
                     </td>
 
+                    {/* Akce */}
                     <td style={{ padding: '0.75rem 1rem' }}>
                       {photo.status === 'done' && photo.enhancedUrl ? (
                         <div style={{ display: 'flex', gap: 6 }}>
@@ -570,6 +542,10 @@ export default function ImageUploader() {
                             {checkoutLoading ? 'Načítám…' : 'Koupit & Stáhnout'}
                           </button>
                         </div>
+                      ) : photo.status === 'processing' ? (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          Pošleme email až bude hotovo
+                        </span>
                       ) : photo.status === 'done' && photo.hdr_group_id ? (
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sloučeno do HDR</span>
                       ) : (

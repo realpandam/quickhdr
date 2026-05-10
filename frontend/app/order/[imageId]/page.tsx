@@ -1,19 +1,26 @@
 'use client';
 
+import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { API_URL } from '../../lib/config';
 
 type Status = 'loading' | 'processing' | 'done' | 'error';
 
-export default function OrderPage({ params }: { params: { imageId: string } }) {
+export default function OrderPage() {
+  const params = useParams();
+  const imageId = params.imageId as string;
+
   const [status, setStatus] = useState<Status>('loading');
   const [enhancedUrl, setEnhancedUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
+    if (!imageId) return;
+
     let progressInterval: ReturnType<typeof setInterval>;
     let pollInterval: ReturnType<typeof setInterval>;
 
+    // Animovaný progress bar — roste pomalu do 90%
     progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 90) return prev;
@@ -21,16 +28,17 @@ export default function OrderPage({ params }: { params: { imageId: string } }) {
       });
     }, 1000);
 
+    // Polling každé 3s
     pollInterval = setInterval(async () => {
       try {
-        const res = await fetch(`${API_URL}/api/enhance/status/${params.imageId}`);
+        const res = await fetch(`${API_URL}/api/enhance/status/${imageId}`);
         const { status: apiStatus } = await res.json();
 
         if (apiStatus === 'processed') {
           clearInterval(pollInterval);
           clearInterval(progressInterval);
           setProgress(100);
-          setEnhancedUrl(`${API_URL}/api/enhance/enhanced/${params.imageId}`);
+          setEnhancedUrl(`${API_URL}/api/enhance/enhanced/${imageId}`);
           setStatus('done');
         } else if (apiStatus === 'failed' || apiStatus === 'error') {
           clearInterval(pollInterval);
@@ -50,7 +58,7 @@ export default function OrderPage({ params }: { params: { imageId: string } }) {
       clearInterval(pollInterval);
       clearInterval(progressInterval);
     };
-  }, [params.imageId]);
+  }, [imageId]);
 
   const handleBuy = async () => {
     try {
@@ -58,7 +66,7 @@ export default function OrderPage({ params }: { params: { imageId: string } }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          image_id: params.imageId,
+          image_id: imageId,
           filename: 'fotografie.jpg',
           user_id: null,
           email: null,
