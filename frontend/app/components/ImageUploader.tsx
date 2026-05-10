@@ -45,6 +45,17 @@ const sendNotification = async (userId: string, filename: string, imageId: strin
   }
 };
 
+// Získej nebo vytvoř session_id pro nepřihlášeného uživatele
+const getSessionId = (): string => {
+  const key = 'fasthdr_session_id';
+  let sessionId = sessionStorage.getItem(key);
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    sessionStorage.setItem(key, sessionId);
+  }
+  return sessionId;
+};
+
 export default function ImageUploader() {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -70,13 +81,10 @@ export default function ImageUploader() {
     sessionStorage.setItem('pending_settings', JSON.stringify(settings));
   }, [settings]);
 
-
   useEffect(() => {
     const saved = sessionStorage.getItem('pending_settings');
     if (saved) {
-      try {
-        setSettings(JSON.parse(saved));
-      } catch { }
+      try { setSettings(JSON.parse(saved)); } catch { }
     }
   }, []);
 
@@ -98,15 +106,19 @@ export default function ImageUploader() {
     requestAnimationFrame(tick);
   }, [updatePhoto]);
 
+  // ── Non-HDR upload ────────────────────────────────────────
   const processPhoto = useCallback(async (item: PhotoItem, currentSettings: Settings) => {
     updatePhoto(item.id, { status: 'uploading', progress: 0 });
     animateProgress(item.id, 0, 30, 800);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      const sessionId = getSessionId();
+
       const formData = new FormData();
       formData.append('image', item.file);
       formData.append('settings', JSON.stringify(currentSettings));
+      formData.append('session_id', sessionId);
       if (user) formData.append('user_id', user.id);
 
       const uploadRes = await fetch(`${API_URL}/api/enhance/upload`, {
@@ -118,12 +130,12 @@ export default function ImageUploader() {
       const { image_id } = await uploadRes.json();
 
       if (!user) {
-        // Nepřihlášený — přesměruj na result stránku, polling tam
-        window.location.href = `/result/${image_id}`;
+        // Nepřihlášený — přesměruj na order stránku s polling
+        window.location.href = `/order/${image_id}`;
         return;
       }
 
-      // Přihlášený — polling jako dřív
+      // Přihlášený — polling + notifikace emailem
       updatePhoto(item.id, { status: 'processing' });
       animateProgress(item.id, 30, 85, 8000);
       await pollStatus(item.id, image_id, item.file.name);
@@ -132,6 +144,7 @@ export default function ImageUploader() {
     }
   }, [updatePhoto, animateProgress]);
 
+  // ── HDR upload ────────────────────────────────────────────
   const processHdrGroup = useCallback(async (
     items: PhotoItem[],
     currentSettings: Settings
@@ -139,12 +152,23 @@ export default function ImageUploader() {
     items.forEach(item => updatePhoto(item.id, { status: 'uploading', progress: 0 }));
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const sessionId = getSessionId();
+
+      // Vytvoř HDR order — pošli user_id, session_id a filename prvního souboru
       const orderRes = await fetch(`${API_URL}/api/enhance/hdr/order`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.id ?? null,
+          session_id: sessionId,
+          filename: items[0].file.name,
+        }),
       });
       if (!orderRes.ok) throw new Error('Nepodařilo se vytvořit order');
       const { order_id } = await orderRes.json();
 
+      // Nahraj brackety
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         const formData = new FormData();
@@ -163,6 +187,7 @@ export default function ImageUploader() {
         items.forEach(it => updatePhoto(it.id, { progress }));
       }
 
+      // Spusť merge
       await fetch(`${API_URL}/api/enhance/hdr/order/${order_id}/merge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -174,15 +199,21 @@ export default function ImageUploader() {
         }),
       });
 
+      if (!user) {
+        // Nepřihlášený — přesměruj na order stránku
+        // Pro HDR použijeme order_id jako identifikátor — backend ho zná
+        window.location.href = `/order/hdr_pending_${order_id}`;
+        return;
+      }
+
+      // Přihlášený — polling
       items.forEach(it => updatePhoto(it.id, { status: 'processing', progress: 45 }));
       await pollOrderStatus(order_id, items);
 
     } catch (err) {
       console.error(err);
       items.forEach(it => updatePhoto(it.id, {
-        status: 'error',
-        error: 'HDR zpracování selhalo',
-        progress: 0,
+        status: 'error', error: 'HDR zpracování selhalo', progress: 0,
       }));
     }
   }, [updatePhoto]);
@@ -207,15 +238,11 @@ export default function ImageUploader() {
             clearInterval(interval);
 
             updatePhoto(items[0].id, {
-              status: 'done',
-              progress: 100,
+              status: 'done', progress: 100,
               enhancedUrl: `${API_URL}/api/enhance/enhanced/${image_ids[0]}`,
             });
-
             items.slice(1).forEach(it => updatePhoto(it.id, {
-              status: 'done',
-              progress: 100,
-              enhancedUrl: null,
+              status: 'done', progress: 100, enhancedUrl: null,
             }));
 
             const { data: { user } } = await supabase.auth.getUser();
@@ -227,9 +254,7 @@ export default function ImageUploader() {
           }
         } catch {
           clearInterval(interval);
-          items.forEach(it => updatePhoto(it.id, {
-            status: 'error', error: 'Chyba sítě', progress: 0,
-          }));
+          items.forEach(it => updatePhoto(it.id, { status: 'error', error: 'Chyba sítě', progress: 0 }));
           reject();
         }
       }, 3000);
@@ -250,12 +275,8 @@ export default function ImageUploader() {
                 status: 'done', progress: 100,
                 enhancedUrl: `${API_URL}/api/enhance/enhanced/${imageId}`,
               });
-
               const { data: { user } } = await supabase.auth.getUser();
-              if (user) {
-                await sendNotification(user.id, filename, imageId);
-              }
-
+              if (user) await sendNotification(user.id, filename, imageId);
               resolve();
             }, 300);
           } else if (status === 'failed') {
@@ -272,7 +293,7 @@ export default function ImageUploader() {
     });
   };
 
-  // ─── Checkout ────────────────────────────────────────────
+  // ─── Checkout ─────────────────────────────────────────────
   const handleCheckout = async (photo: PhotoItem) => {
     try {
       setCheckoutLoading(true);
@@ -293,16 +314,13 @@ export default function ImageUploader() {
       });
 
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      }
+      if (data.url) window.location.href = data.url;
     } catch (err) {
       console.error('Chyba při vytváření platby:', err);
     } finally {
       setCheckoutLoading(false);
     }
   };
-  // ─────────────────────────────────────────────────────────
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const rawExts = ['.arw', '.cr2', '.cr3', '.crw', '.nef', '.nrw', '.sr2', '.srf', '.raf', '.orf', '.rw2', '.pef', '.kdc', '.erf', '.dng', '.iiq', '.mos', '.mef', '.fff', '.3fr', '.x3f', '.rwl', '.srw'];
@@ -315,8 +333,8 @@ export default function ImageUploader() {
     if (validFiles.length === 0) return;
 
     const captured = { ...settings };
-
     const groupId = crypto.randomUUID();
+
     const newItems: PhotoItem[] = validFiles.map(file => ({
       id: crypto.randomUUID(),
       file,
@@ -340,7 +358,6 @@ export default function ImageUploader() {
     }
   }, [settings, processPhoto, processHdrGroup]);
 
-  // ── Uzamčení drag & drop při zpracování ──────────────────
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -353,18 +370,15 @@ export default function ImageUploader() {
     if (e.target.files) addFiles(e.target.files);
     e.target.value = '';
   };
-  // ─────────────────────────────────────────────────────────
 
   const handleReset = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
     setPhotos([]);
   };
 
-  // Pomocná funkce — ulož souhlas na backend
   const saveConsent = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-
     await fetch(`${API_URL}/api/enhance/consent`, {
       method: 'POST',
       headers: {
@@ -374,17 +388,14 @@ export default function ImageUploader() {
     });
   };
 
-  // Kontrola existujícího souhlasu
   const checkConsent = async (): Promise<boolean> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
-
     const { data } = await supabase
       .from('user_consents')
       .select('agreed_to_terms_at')
       .eq('user_id', user.id)
       .single();
-
     return !!data?.agreed_to_terms_at;
   };
 
@@ -401,7 +412,7 @@ export default function ImageUploader() {
 
       <SettingsPanel settings={settings} onChange={setSettings} disabled={isProcessing} />
 
-      {/* Drop zone — uzamčena při zpracování */}
+      {/* Drop zone */}
       <label
         onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
@@ -426,8 +437,7 @@ export default function ImageUploader() {
       >
         <div style={{
           width: 44, height: 44, borderRadius: '50%',
-          background: 'var(--accent-muted)',
-          border: '1px solid var(--border)',
+          background: 'var(--accent-muted)', border: '1px solid var(--border)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 20, marginBottom: '1rem',
         }}>
@@ -451,7 +461,6 @@ export default function ImageUploader() {
         />
       </label>
 
-      {/* CloudPicker — odsazení 2rem a uzamčení při zpracování */}
       <div style={{ marginBottom: '2rem' }}>
         <CloudPicker onFiles={(files) => { if (!isProcessing) addFiles(files); }} />
       </div>
@@ -459,11 +468,7 @@ export default function ImageUploader() {
       {/* Tabulka */}
       {photos.length > 0 && (
         <>
-          <div style={{
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius)',
-            overflow: 'hidden',
-          }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-secondary)' }}>
@@ -472,8 +477,7 @@ export default function ImageUploader() {
                       textAlign: 'left', padding: '0.65rem 1rem',
                       fontWeight: 600, fontSize: 11, letterSpacing: '0.08em',
                       textTransform: 'uppercase' as const,
-                      color: 'var(--text-muted)',
-                      borderBottom: '1px solid var(--border)',
+                      color: 'var(--text-muted)', borderBottom: '1px solid var(--border)',
                     }}>
                       {h}
                     </th>
@@ -486,50 +490,34 @@ export default function ImageUploader() {
                     borderBottom: i < photos.length - 1 ? '1px solid var(--border)' : 'none',
                     background: 'var(--bg)',
                   }}>
-                    {/* Náhled */}
                     <td style={{ padding: '0.75rem 1rem' }}>
                       <div
-                        onClick={() => photo.enhancedUrl
-                          ? setLightbox(photo.enhancedUrl)
-                          : undefined
-                        }
+                        onClick={() => photo.enhancedUrl ? setLightbox(photo.enhancedUrl) : undefined}
                         style={{
                           width: 60, height: 44, borderRadius: 4, overflow: 'hidden',
                           cursor: photo.enhancedUrl ? 'pointer' : 'default',
-                          background: 'var(--bg-secondary)',
-                          border: '1px solid var(--border)',
+                          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}
                       >
                         {photo.enhancedUrl ? (
-                          <img
-                            src={photo.enhancedUrl}
-                            alt=""
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
+                          <img src={photo.enhancedUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         ) : (
                           <span style={{ fontSize: 20, opacity: 0.3 }}>🖼️</span>
                         )}
                       </div>
                     </td>
 
-                    {/* Soubor */}
                     <td style={{ padding: '0.75rem 1rem', maxWidth: 220 }}>
                       <p style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
                         {photo.file.name}
                       </p>
                       {photo.hdr_group_id && (
                         <span style={{
-                          fontSize: 9, fontWeight: 700,
-                          letterSpacing: '0.1em',
-                          textTransform: 'uppercase' as const,
-                          color: 'var(--accent)',
-                          background: 'var(--accent-muted)',
-                          border: '1px solid var(--accent-glow)',
-                          padding: '1px 6px',
-                          borderRadius: 999,
-                          marginTop: 3,
-                          display: 'inline-block',
+                          fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
+                          textTransform: 'uppercase' as const, color: 'var(--accent)',
+                          background: 'var(--accent-muted)', border: '1px solid var(--accent-glow)',
+                          padding: '1px 6px', borderRadius: 999, marginTop: 3, display: 'inline-block',
                         }}>
                           HDR
                         </span>
@@ -539,20 +527,15 @@ export default function ImageUploader() {
                       </p>
                     </td>
 
-                    {/* Stav */}
                     <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' as const }}>
                       <span style={{ color: statusColor[photo.status] }}>
                         {photo.error ?? statusLabel[photo.status]}
                       </span>
                     </td>
 
-                    {/* Progress */}
                     <td style={{ padding: '0.75rem 1rem', minWidth: 140 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{
-                          flex: 1, height: 2, background: 'var(--progress-bg)',
-                          borderRadius: 999, overflow: 'hidden',
-                        }}>
+                        <div style={{ flex: 1, height: 2, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
                           <div style={{
                             height: '100%', width: `${photo.progress}%`,
                             background: photo.status === 'done' ? 'var(--progress-done)' : 'var(--progress-fill)',
@@ -565,15 +548,10 @@ export default function ImageUploader() {
                       </div>
                     </td>
 
-                    {/* Akce */}
                     <td style={{ padding: '0.75rem 1rem' }}>
                       {photo.status === 'done' && photo.enhancedUrl ? (
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            onClick={() => setLightbox(photo.enhancedUrl!)}
-                            className="btn"
-                            style={{ padding: '4px 10px', fontSize: 12 }}
-                          >
+                          <button onClick={() => setLightbox(photo.enhancedUrl!)} className="btn" style={{ padding: '4px 10px', fontSize: 12 }}>
                             Náhled
                           </button>
                           <button
@@ -593,9 +571,7 @@ export default function ImageUploader() {
                           </button>
                         </div>
                       ) : photo.status === 'done' && photo.hdr_group_id ? (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          Sloučeno do HDR
-                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sloučeno do HDR</span>
                       ) : (
                         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
                       )}
@@ -607,50 +583,29 @@ export default function ImageUploader() {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-            <button onClick={handleReset} className="btn">
-              Vymazat vše
-            </button>
+            <button onClick={handleReset} className="btn">Vymazat vše</button>
           </div>
         </>
       )}
 
       {/* Consent modal */}
       {consentModal && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 1001,
-          background: 'rgba(0,0,0,0.85)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <div style={{
-            background: 'var(--bg-card)',
-            borderRadius: 12,
-            width: 480,
-            padding: '2rem',
-            border: '1px solid var(--border)',
-          }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1001, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg-card)', borderRadius: 12, width: 480, padding: '2rem', border: '1px solid var(--border)' }}>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
               Před dokončením objednávky
             </h3>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
               Soubor: <strong style={{ color: 'var(--text-secondary)' }}>{consentModal.file.name}</strong>
             </p>
-
             <ConsentCheckboxes
               agreedToTerms={agreedToTerms}
               agreedToPrivacy={agreedToPrivacy}
               onTermsChange={setAgreedToTerms}
               onPrivacyChange={setAgreedToPrivacy}
             />
-
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: '1.5rem' }}>
-              <button
-                className="btn"
-                onClick={() => {
-                  setConsentModal(null);
-                  setAgreedToTerms(false);
-                  setAgreedToPrivacy(false);
-                }}
-              >
+              <button className="btn" onClick={() => { setConsentModal(null); setAgreedToTerms(false); setAgreedToPrivacy(false); }}>
                 Zrušit
               </button>
               <button
@@ -671,21 +626,9 @@ export default function ImageUploader() {
 
       {/* Lightbox */}
       {lightbox && (
-        <div onClick={() => setLightbox(null)} style={{
-          position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(0,0,0,0.92)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'zoom-out',
-        }}>
-          <img src={lightbox} alt="Náhled" style={{
-            maxWidth: '90vw', maxHeight: '90vh',
-            objectFit: 'contain', borderRadius: 4,
-          }} />
-          <button onClick={() => setLightbox(null)} style={{
-            position: 'fixed', top: 20, right: 24,
-            background: 'none', border: 'none',
-            color: '#fff', fontSize: 24, cursor: 'pointer',
-          }}>✕</button>
+        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
+          <img src={lightbox} alt="Náhled" style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 4 }} />
+          <button onClick={() => setLightbox(null)} style={{ position: 'fixed', top: 20, right: 24, background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>✕</button>
         </div>
       )}
     </section>
