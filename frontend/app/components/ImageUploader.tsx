@@ -103,9 +103,11 @@ export default function ImageUploader() {
     animateProgress(item.id, 0, 30, 800);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
       const formData = new FormData();
       formData.append('image', item.file);
       formData.append('settings', JSON.stringify(currentSettings));
+      if (user) formData.append('user_id', user.id);
 
       const uploadRes = await fetch(`${API_URL}/api/enhance/upload`, {
         method: 'POST',
@@ -115,9 +117,15 @@ export default function ImageUploader() {
       if (!uploadRes.ok) throw new Error('Upload selhal');
       const { image_id } = await uploadRes.json();
 
+      if (!user) {
+        // Nepřihlášený — přesměruj na result stránku, polling tam
+        window.location.href = `/result/${image_id}`;
+        return;
+      }
+
+      // Přihlášený — polling jako dřív
       updatePhoto(item.id, { status: 'processing' });
       animateProgress(item.id, 30, 85, 8000);
-
       await pollStatus(item.id, image_id, item.file.name);
     } catch {
       updatePhoto(item.id, { status: 'error', error: 'Zpracování selhalo', progress: 0 });

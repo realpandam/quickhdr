@@ -16,6 +16,7 @@ const upload = multer({
 
 const API_KEY = process.env.AUTOENHANCE_API_KEY!;
 const API_BASE = 'https://api.autoenhance.ai';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.fasthdr.cz';
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
@@ -60,7 +61,8 @@ function getMimeType(filename: string, fallback: string): string {
   return mimeMap[ext] ?? fallback;
 }
 
-// ── Upload ────────────────────────────────────────────────────────────────────
+// ── Upload (non-HDR) ──────────────────────────────────────────────────────────
+// Ukládá order do DB ihned po uploadu — pro přihlášené i nepřihlášené
 router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (req: Request, res: Response) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   const file = files['image']?.[0];
@@ -75,6 +77,11 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
     const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
     const rawSettings = req.body.settings ? JSON.parse(req.body.settings) : {};
 
+    // user_id a session_id přijdou z frontendu
+    const user_id = req.body.user_id || null;
+    const session_id = req.body.session_id || null;
+
+    // Krok 1: Vytvoř image v Autoenhance
     const createResponse = await axios.post(
       `${API_BASE}/v3/images/`,
       {
@@ -101,11 +108,23 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
 
     const { image_id, s3PutObjectUrl: upload_url } = createResponse.data;
 
+    // Krok 2: Nahraj soubor na S3
     const urlParams = new URL(upload_url);
     const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
     await axios.put(upload_url, file.buffer, {
       headers: { 'Content-Type': contentTypeFromUrl },
+    });
+
+    // Krok 3: Ihned ulož order do DB (asynchronní zpracování — webhook dorazí později)
+    await supabase.from('orders').insert({
+      image_id,
+      filename: file.originalname,
+      payment_status: 'pending',
+      amount_czk: 59,
+      user_id: user_id || null,
+      session_id: session_id || null,
+      payment_session_id: `pending_${image_id}`,
     });
 
     res.json({ image_id });
@@ -213,14 +232,35 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
 });
 
 // ── HDR: Vytvoř order ─────────────────────────────────────────────────────────
+// Ukládá HDR order do DB ihned — pro přihlášené i nepřihlášené
 router.post('/hdr/order', async (req: Request, res: Response) => {
   try {
+    const user_id = req.body.user_id || null;
+    const session_id = req.body.session_id || null;
+    const filename = req.body.filename || null;
+
     const response = await axios.post(
       `${API_BASE}/v3/orders/`,
       {},
       { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } }
     );
-    res.json({ order_id: response.data.order_id });
+
+    const { order_id } = response.data;
+
+    // Ulož HDR order do DB ihned — image_id přijde z webhookem
+    // Používáme hdr_group_id = order_id pro propojení
+    await supabase.from('orders').insert({
+      image_id: `hdr_pending_${order_id}`, // placeholder — přepíše webhook
+      filename: filename || null,
+      payment_status: 'pending',
+      amount_czk: 59,
+      user_id: user_id || null,
+      session_id: session_id || null,
+      hdr_order_id: order_id, // nový sloupec pro HDR
+      payment_session_id: `pending_hdr_${order_id}`,
+    });
+
+    res.json({ order_id });
   } catch (error) {
     console.error('Chyba při vytváření orderu:', error);
     res.status(500).json({ error: 'Nepodařilo se vytvořit order' });
@@ -387,7 +427,79 @@ router.get('/cron/expiry-reminders', async (req: Request, res: Response) => {
   }
 });
 
-// ── Notify: zpracování dokončeno ──────────────────────────────────────────────
+// ── Autoenhance Webhook ───────────────────────────────────────────────────────
+// Autoenhance volá tento endpoint po dokončení zpracování každé fotky
+router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
+  // Odpověz okamžitě — Autoenhance čeká max 5s
+  res.status(200).json({ ok: true });
+
+  try {
+    const { event, image_id, error, order_id, order_is_processing } = req.body;
+
+    // Zpracuj pouze úspěšně dokončené fotky
+    if (event !== 'image_processed' || error) return;
+
+    // ── Non-HDR: najdi order podle image_id ──
+    let order = null;
+    const { data: directOrder } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('image_id', image_id)
+      .single();
+
+    if (directOrder) {
+      order = directOrder;
+    }
+
+    // ── HDR: najdi order podle hdr_order_id, ale jen pokud order už není processing ──
+    if (!order && order_id && !order_is_processing) {
+      const { data: hdrOrder } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('hdr_order_id', order_id)
+        .single();
+
+      if (hdrOrder) {
+        // Aktualizuj image_id placeholder na skutečný
+        await supabase
+          .from('orders')
+          .update({ image_id })
+          .eq('hdr_order_id', order_id);
+
+        order = { ...hdrOrder, image_id };
+      }
+    }
+
+    if (!order) return;
+
+    // ── Přihlášený uživatel — pošli email ──
+    if (order.user_id) {
+      try {
+        const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
+        if (userData?.user?.email) {
+          await resend.emails.send({
+            from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
+            to: userData.user.email,
+            subject: 'Vaše fotografie je zpracována ✓',
+            html: notifyEmailHtml(order.filename, image_id, FRONTEND_URL),
+          });
+        }
+      } catch (emailErr) {
+        console.error('Chyba při odesílání emailu:', emailErr);
+      }
+    }
+
+    // ── Nepřihlášený uživatel — nic neposíláme,
+    //    uživatel sleduje stav na /result/[imageId] stránce ──
+
+  } catch (err) {
+    console.error('Webhook chyba:', err);
+  }
+});
+
+// ── Notify: starý endpoint — zachován pro zpětnou kompatibilitu ───────────────
+// Nové asynchronní zpracování používá webhook, ale polling v ImageUploader
+// stále volá notify pro přihlášené uživatele jako fallback
 router.post('/notify', async (req: Request, res: Response) => {
   try {
     const { user_id, filename, image_id } = req.body;
@@ -397,74 +509,36 @@ router.post('/notify', async (req: Request, res: Response) => {
       return;
     }
 
-    await supabase.from('orders').upsert({
-      image_id,
-      filename: filename && !filename.includes(image_id) ? filename : null,
-      payment_status: 'pending',
-      amount_czk: 59,
-      user_id,
-      payment_session_id: `pending_${image_id}`,
-    });
+    // Zkontroluj jestli order již existuje (webhook ho mohl vytvořit dříve)
+    const { data: existing } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('image_id', image_id)
+      .single();
 
+    if (!existing) {
+      await supabase.from('orders').insert({
+        image_id,
+        filename: filename && !filename.includes(image_id) ? filename : null,
+        payment_status: 'pending',
+        amount_czk: 59,
+        user_id,
+        payment_session_id: `pending_${image_id}`,
+      });
+    }
+
+    // Email notifikace
     const { data: userData, error } = await supabase.auth.admin.getUserById(user_id);
     if (error || !userData?.user?.email) {
       res.status(404).json({ error: 'Uživatel nenalezen' });
       return;
     }
 
-    const userEmail = userData.user.email;
-
     await resend.emails.send({
       from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
-      to: userEmail,
+      to: userData.user.email,
       subject: 'Vaše fotografie je zpracována a připravena ke koupi',
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-        </head>
-        <body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-          <div style="max-width:560px;margin:0 auto;padding:48px 24px;">
-
-            <p style="font-size:14px;font-weight:600;color:#ffffff;margin:0 0 40px;">
-              FASTHDR
-            </p>
-
-            <h1 style="font-size:24px;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
-              Zpracování dokončeno ✓
-            </h1>
-            <p style="font-size:15px;color:#888;margin:0 0 32px;line-height:1.6;">
-              Vaše fotografie <strong style="color:#ccc;">${filename ?? 'bez názvu'}</strong>
-              byla úspěšně zpracována pomocí AI. Můžete si prohlédnout náhled a zakoupit plné rozlišení.
-            </p>
-
-            <a href="${process.env.FRONTEND_URL}/dashboard"
-               style="display:inline-block;background:#f59e0b;color:#000;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;text-decoration:none;margin-bottom:32px;">
-              Zobrazit v Moje fotografie →
-            </a>
-
-            <div style="border:1px solid #222;border-radius:8px;padding:20px;margin-bottom:32px;">
-              <p style="font-size:13px;color:#666;margin:0 0 8px;">
-                <strong style="color:#888;">Soubor:</strong> ${filename ?? image_id}
-              </p>
-              <p style="font-size:13px;color:#666;margin:0 0 8px;">
-                <strong style="color:#888;">Cena:</strong> 59 Kč
-              </p>
-              <p style="font-size:13px;color:#666;margin:0;">
-                <strong style="color:#888;">Podpora:</strong> info@fasthdr.cz
-              </p>
-            </div>
-
-            <p style="font-size:12px;color:#444;margin:0;line-height:1.6;">
-              © ${new Date().getFullYear()} FASTHDR. Všechna práva vyhrazena.<br>
-              IČO: 23584203 · Drnovec 1, 471 54 Cvikov
-            </p>
-          </div>
-        </body>
-        </html>
-      `,
+      html: notifyEmailHtml(filename, image_id, FRONTEND_URL),
     });
 
     res.json({ ok: true });
@@ -473,5 +547,44 @@ router.post('/notify', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Nepodařilo se odeslat notifikaci' });
   }
 });
+
+// ── Helper: email šablona ─────────────────────────────────────────────────────
+function notifyEmailHtml(filename: string, imageId: string, frontendUrl: string): string {
+  return `<!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+    <body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+      <div style="max-width:560px;margin:0 auto;padding:48px 24px;">
+        <p style="font-size:14px;font-weight:600;color:#ffffff;margin:0 0 40px;">FASTHDR</p>
+        <h1 style="font-size:24px;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
+          Zpracování dokončeno ✓
+        </h1>
+        <p style="font-size:15px;color:#888;margin:0 0 32px;line-height:1.6;">
+          Vaše fotografie <strong style="color:#ccc;">${filename ?? 'bez názvu'}</strong>
+          byla úspěšně zpracována pomocí AI. Můžete si prohlédnout náhled a zakoupit plné rozlišení.
+        </p>
+        <a href="${frontendUrl}/dashboard"
+           style="display:inline-block;background:#f59e0b;color:#000;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;text-decoration:none;margin-bottom:32px;">
+          Zobrazit v Moje fotografie →
+        </a>
+        <div style="border:1px solid #222;border-radius:8px;padding:20px;margin-bottom:32px;">
+          <p style="font-size:13px;color:#666;margin:0 0 8px;">
+            <strong style="color:#888;">Soubor:</strong> ${filename ?? imageId}
+          </p>
+          <p style="font-size:13px;color:#666;margin:0 0 8px;">
+            <strong style="color:#888;">Cena:</strong> 59 Kč
+          </p>
+          <p style="font-size:13px;color:#666;margin:0;">
+            <strong style="color:#888;">Podpora:</strong> info@fasthdr.cz
+          </p>
+        </div>
+        <p style="font-size:12px;color:#444;margin:0;line-height:1.6;">
+          © ${new Date().getFullYear()} FASTHDR. Všechna práva vyhrazena.<br>
+          IČO: 23584203 · Drnovec 1, 471 54 Cvikov
+        </p>
+      </div>
+    </body>
+    </html>`;
+}
 
 export default router;
