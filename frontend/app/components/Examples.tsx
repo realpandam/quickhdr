@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface Example {
   title: string; tag: string; settings: string[]; before: string; after: string;
@@ -17,11 +17,6 @@ const EXAMPLES: Example[] = [
     settings: ['Vytažení oken', 'Neutrální tón'],
     before: '/examples/cisty-vyhled-z-oken-before.webp', after: '/examples/cisty-vyhled-z-oken-after.webp',
   },
-  // {
-  //   title: 'Odstranění fotografa — retušování odrazů', tag: 'Interiér',
-  //   settings: ['Odstranění objektů', 'Neutrální tón'],
-  //   before: '/examples/odstraneni-fotografa-before.webp', after: '/examples/odstraneni-fotografa-after.webp',
-  // },
   {
     title: 'Odstranění zkreslení — korekce objektivu', tag: 'Interiér',
     settings: ['Korekce objektivu', 'Korekce vertikály'],
@@ -46,62 +41,222 @@ const EXAMPLES: Example[] = [
 
 function BeforeAfterSlider({ before, after }: { before: string; after: string }) {
   const [pos, setPos] = useState(50);
+  const [hasInteracted, setHasInteracted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
+  const targetPos = useRef(50);
+  const animFrame = useRef<number | null>(null);
+
+  // Smooth lerp animation
+  useEffect(() => {
+    const lerp = () => {
+      setPos(p => {
+        const next = p + (targetPos.current - p) * 0.18;
+        return Math.abs(next - targetPos.current) < 0.05 ? targetPos.current : next;
+      });
+      animFrame.current = requestAnimationFrame(lerp);
+    };
+    animFrame.current = requestAnimationFrame(lerp);
+    return () => {
+      if (animFrame.current) cancelAnimationFrame(animFrame.current);
+    };
+  }, []);
 
   const updatePos = useCallback((clientX: number) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const pct = Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100));
-    setPos(pct);
-  }, []);
+    targetPos.current = pct;
+    if (!hasInteracted) setHasInteracted(true);
+  }, [hasInteracted]);
 
   return (
     <div
-      ref={containerRef} className="ba-container"
-      style={{ aspectRatio: '4/3', background: 'var(--bg-secondary)', userSelect: 'none' as const }}
-      onMouseDown={() => { dragging.current = true; }}
-      onMouseMove={e => { if (dragging.current) updatePos(e.clientX); }}
+      ref={containerRef}
+      className="ba-container"
+      style={{
+        aspectRatio: '4/3',
+        background: 'var(--bg-secondary)',
+        userSelect: 'none' as const,
+        position: 'relative' as const,
+        overflow: 'hidden',
+        cursor: 'ew-resize',
+        touchAction: 'none',
+      }}
+      onMouseDown={(e) => {
+        dragging.current = true;
+        updatePos(e.clientX);
+      }}
+      onMouseMove={(e) => {
+        if (dragging.current) updatePos(e.clientX);
+      }}
       onMouseUp={() => { dragging.current = false; }}
       onMouseLeave={() => { dragging.current = false; }}
-      onTouchMove={e => updatePos(e.touches[0].clientX)}
+      onTouchStart={(e) => {
+        dragging.current = true;
+        updatePos(e.touches[0].clientX);
+      }}
+      onTouchMove={(e) => {
+        if (dragging.current) updatePos(e.touches[0].clientX);
+      }}
+      onTouchEnd={() => { dragging.current = false; }}
     >
-      <img src={before} alt="Před" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-      <span className="ba-label" style={{ left: 12 }}>Před</span>
-      <div className="ba-after" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}>
-        <img src={after} alt="Po" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-        <span className="ba-label" style={{ right: 12 }}>Po</span>
+      <img
+        src={before}
+        alt="Před"
+        draggable={false}
+        style={{
+          width: '100%', height: '100%', objectFit: 'cover',
+          display: 'block', pointerEvents: 'none' as const,
+        }}
+      />
+      <span style={{
+        position: 'absolute' as const,
+        top: 12, left: 12,
+        background: 'rgba(0,0,0,0.7)',
+        backdropFilter: 'blur(8px)',
+        color: '#fff',
+        fontSize: 11, fontWeight: 700,
+        letterSpacing: '0.1em',
+        padding: '4px 10px',
+        borderRadius: 6,
+        border: '1px solid rgba(255,255,255,0.1)',
+        textTransform: 'uppercase' as const,
+      }}>
+        PŘED
+      </span>
+
+      {/* After image with clip */}
+      <div style={{
+        position: 'absolute' as const,
+        inset: 0,
+        clipPath: `inset(0 ${100 - pos}% 0 0)`,
+        willChange: 'clip-path',
+      }}>
+        <img
+          src={after}
+          alt="Po"
+          draggable={false}
+          style={{
+            width: '100%', height: '100%', objectFit: 'cover',
+            display: 'block', pointerEvents: 'none' as const,
+          }}
+        />
+        <span style={{
+          position: 'absolute' as const,
+          top: 12, right: 12,
+          background: 'linear-gradient(135deg, #6B47DC, #A78BFA)',
+          color: '#fff',
+          fontSize: 11, fontWeight: 700,
+          letterSpacing: '0.1em',
+          padding: '4px 10px',
+          borderRadius: 6,
+          textTransform: 'uppercase' as const,
+          boxShadow: '0 4px 12px rgba(107,71,220,0.4)',
+        }}>
+          PO
+        </span>
       </div>
-      <div className="ba-divider" style={{ left: `${pos}%` }}>
-        <div className="ba-handle">⇔</div>
+
+      {/* Divider line */}
+      <div style={{
+        position: 'absolute' as const,
+        top: 0, bottom: 0,
+        left: `${pos}%`,
+        width: 2,
+        background: '#fff',
+        boxShadow: '0 0 16px rgba(255,255,255,0.5), 0 0 32px rgba(139,92,246,0.3)',
+        transform: 'translateX(-50%)',
+        willChange: 'left',
+        pointerEvents: 'none' as const,
+      }} />
+
+      {/* Handle */}
+      <div style={{
+        position: 'absolute' as const,
+        top: '50%',
+        left: `${pos}%`,
+        transform: 'translate(-50%, -50%)',
+        width: 48,
+        height: 48,
+        borderRadius: '50%',
+        background: 'linear-gradient(135deg, #fff, #f0f0f0)',
+        boxShadow: '0 6px 24px rgba(0,0,0,0.4), 0 0 0 2px rgba(139,92,246,0.4), 0 0 24px rgba(139,92,246,0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 2,
+        willChange: 'left',
+        animation: hasInteracted ? 'none' : 'handlePulse 2.5s ease-in-out infinite',
+        cursor: 'ew-resize',
+      }}>
+        {/* Arrow icons */}
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M9 6L4 12L9 18" stroke="#6B47DC" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M15 6L20 12L15 18" stroke="#6B47DC" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </div>
+
+      {/* Initial hint - shown until interaction */}
+      {!hasInteracted && (
+        <div style={{
+          position: 'absolute' as const,
+          bottom: 12,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(8px)',
+          color: '#fff',
+          fontSize: 11,
+          fontWeight: 500,
+          padding: '6px 14px',
+          borderRadius: 100,
+          border: '1px solid rgba(255,255,255,0.1)',
+          pointerEvents: 'none' as const,
+          animation: 'hintFade 3s ease-in-out infinite',
+          whiteSpace: 'nowrap' as const,
+        }}>
+          ← Přetáhněte pro porovnání →
+        </div>
+      )}
+
+      <style>{`
+        @keyframes handlePulse {
+          0%, 100% {
+            box-shadow: 0 6px 24px rgba(0,0,0,0.4), 0 0 0 2px rgba(139,92,246,0.4), 0 0 24px rgba(139,92,246,0.5);
+            transform: translate(-50%, -50%) scale(1);
+          }
+          50% {
+            box-shadow: 0 6px 24px rgba(0,0,0,0.4), 0 0 0 4px rgba(139,92,246,0.6), 0 0 40px rgba(139,92,246,0.8);
+            transform: translate(-50%, -50%) scale(1.08);
+          }
+        }
+        @keyframes hintFade {
+          0%, 100% { opacity: 0.85; }
+          50% { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
 
 function ExampleCard({ ex, index }: { ex: Example; index: number }) {
   const [hovered, setHovered] = useState(false);
-  const [tilt, setTilt] = useState({ x: 0, y: 0 });
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = (e.clientX - rect.left - rect.width / 2) / rect.width;
-    const y = (e.clientY - rect.top - rect.height / 2) / rect.height;
-    setTilt({ x: y * 5, y: x * -5 });
-  };
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setTilt({ x: 0, y: 0 }); }}
-      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setHovered(false)}
       style={{
         background: 'var(--bg-card)',
         border: `1px solid ${hovered ? 'var(--accent-glow)' : 'var(--border)'}`,
-        borderRadius: 'var(--radius)', overflow: 'hidden',
-        transition: 'border-color 0.3s, box-shadow 0.3s',
-        boxShadow: hovered ? '0 24px 60px rgba(139,92,246,0.15), 0 8px 24px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.1)', transform: `perspective(1000px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateZ(${hovered ? 6 : 0}px)`,
-        transformStyle: 'preserve-3d' as const,
+        borderRadius: 'var(--radius)',
+        overflow: 'hidden',
+        transition: 'border-color 0.3s, box-shadow 0.3s, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        boxShadow: hovered
+          ? '0 24px 60px rgba(139,92,246,0.18), 0 8px 24px rgba(0,0,0,0.3)'
+          : '0 2px 8px rgba(0,0,0,0.1)',
+        transform: hovered ? 'translateY(-4px)' : 'translateY(0)',
         willChange: 'transform',
       }}
     >
@@ -147,7 +302,7 @@ export default function Examples() {
       <div style={{
         position: 'absolute' as const, top: '40%', left: '-5%',
         width: 500, height: 500,
-        background: 'radial-gradient(ellipse, rgba(245,158,11,0.05) 0%, transparent 70%)',
+        background: 'radial-gradient(ellipse, rgba(139,92,246,0.05) 0%, transparent 70%)',
         pointerEvents: 'none',
       }} />
       <div style={{ maxWidth: 1200, margin: '0 auto', position: 'relative' as const }}>
@@ -157,12 +312,18 @@ export default function Examples() {
           alignItems: 'flex-end', marginBottom: '3rem',
           flexWrap: 'wrap' as const, gap: '1rem',
         }}>
-          <h2 style={{
-            fontSize: 'clamp(1.5rem, 3vw, 2.5rem)',
-            fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)',
-          }}>
-            Výsledky AI retušování
-          </h2>
+          <div>
+            <h2 style={{
+              fontSize: 'clamp(1.5rem, 3vw, 2.5rem)',
+              fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)',
+              marginBottom: '0.5rem',
+            }}>
+              Výsledky AI retušování
+            </h2>
+            <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
+              Přetáhněte slider pro porovnání před a po úpravě.
+            </p>
+          </div>
           <a href="#editor" className="btn btn-primary">Vyzkoušet zdarma →</a>
         </div>
         <div style={{

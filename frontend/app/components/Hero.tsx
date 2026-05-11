@@ -2,31 +2,79 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const PARTICLES = Array.from({ length: 60 }, (_, i) => ({
+const PARTICLES = Array.from({ length: 40 }, (_, i) => ({
   id: i,
   x: (i * 37.3) % 100,
   y: (i * 61.7) % 100,
   size: (i % 5) * 0.4 + 0.6,
-  opacity: (i % 5) * 0.08 + 0.08,
+  opacity: (i % 5) * 0.06 + 0.08,
   speed: (i % 6) * 3 + 14,
   delay: -(i * 0.8),
 }));
 
-export default function Hero() {
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const sectionRef = useRef<HTMLElement>(null);
+const STATS = [
+  { value: 10000, suffix: '+', label: 'Zpracovaných fotografií' },
+  { value: 30, suffix: ' min', label: 'Doba zpracování' },
+  { value: 5, prefix: 'v', label: 'AI model generace' },
+  { value: 100, suffix: '%', label: 'Automatické' },
+];
+
+function AnimatedCounter({ value, prefix = '', suffix = '', duration = 2000 }: { value: number; prefix?: string; suffix?: string; duration?: number }) {
+  const [count, setCount] = useState(0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const animated = useRef(false);
 
   useEffect(() => {
+    if (!ref.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting && !animated.current) {
+            animated.current = true;
+            const startTime = performance.now();
+            const animate = (now: number) => {
+              const elapsed = now - startTime;
+              const progress = Math.min(1, elapsed / duration);
+              const eased = 1 - Math.pow(1 - progress, 3);
+              setCount(Math.floor(value * eased));
+              if (progress < 1) requestAnimationFrame(animate);
+              else setCount(value);
+            };
+            requestAnimationFrame(animate);
+          }
+        });
+      },
+      { threshold: 0.3 }
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [value, duration]);
+
+  return (
+    <span ref={ref}>{prefix}{count.toLocaleString('cs-CZ')}{suffix}</span>
+  );
+}
+
+export default function Hero() {
+  const sectionRef = useRef<HTMLElement>(null);
+
+  // Global mouse tracking - nastavuje --mx --my pro mouse-glow přes celou stránku
+  useEffect(() => {
     const handleMouse = (e: MouseEvent) => {
-      if (!sectionRef.current) return;
-      const rect = sectionRef.current.getBoundingClientRect();
-      setMousePos({
-        x: (e.clientX - rect.left - rect.width / 2) / rect.width,
-        y: (e.clientY - rect.top - rect.height / 2) / rect.height,
-      });
+      document.documentElement.style.setProperty('--mx', `${e.clientX}px`);
+      document.documentElement.style.setProperty('--my', `${e.clientY}px`);
     };
     window.addEventListener('mousemove', handleMouse);
     return () => window.removeEventListener('mousemove', handleMouse);
+  }, []);
+
+  // Inject mouse glow element jen jednou
+  useEffect(() => {
+    if (!document.querySelector('.mouse-glow')) {
+      const glow = document.createElement('div');
+      glow.className = 'mouse-glow';
+      document.body.appendChild(glow);
+    }
   }, []);
 
   return (
@@ -42,8 +90,8 @@ export default function Hero() {
       alignItems: 'center',
       justifyContent: 'center',
     }}>
-      {/* Particles */}
-      <div style={{ position: 'absolute' as const, inset: 0, pointerEvents: 'none' }}>
+      {/* Particles - lokální v Hero */}
+      <div style={{ position: 'absolute' as const, inset: 0, pointerEvents: 'none', zIndex: 1 }}>
         {PARTICLES.map(p => (
           <div key={p.id} style={{
             position: 'absolute' as const,
@@ -60,30 +108,7 @@ export default function Hero() {
         ))}
       </div>
 
-      {/* Ambient glow */}
-      <div style={{
-        position: 'absolute' as const,
-        top: '30%', left: '50%',
-        transform: `translate(calc(-50% + ${mousePos.x * 30}px), calc(-50% + ${mousePos.y * 20}px))`,
-        width: 800, height: 400,
-        background: 'radial-gradient(ellipse, rgba(139,92,246,0.15) 0%, transparent 70%)',
-        pointerEvents: 'none' as const,
-        transition: 'transform 0.3s ease',
-        zIndex: 0,
-      }} />
-      <div style={{
-        position: 'absolute' as const,
-        top: '60%', left: '30%',
-        transform: `translate(calc(-50% + ${mousePos.x * -20}px), calc(-50% + ${mousePos.y * -15}px))`,
-        width: 500, height: 300,
-        background: 'radial-gradient(ellipse, rgba(139,92,246,0.08) 0%, transparent 70%)',
-        pointerEvents: 'none' as const,
-        transition: 'transform 0.4s ease',
-        zIndex: 0,
-      }} />
-
-      <div style={{ position: 'relative' as const, zIndex: 1, maxWidth: 1200, margin: '0 auto', width: '100%' }}>
-
+      <div style={{ position: 'relative' as const, zIndex: 2, maxWidth: 1200, margin: '0 auto', width: '100%' }}>
         {/* Badge */}
         <div className="fade-up fade-up-1" style={{
           display: 'inline-flex',
@@ -114,10 +139,10 @@ export default function Hero() {
           lineHeight: 1.05,
           letterSpacing: '-0.03em',
           color: 'var(--text-primary)',
-          maxWidth: 800,
+          maxWidth: 900,
           margin: '0 auto 1.5rem',
         }}>
-          Profesionální výsledky{' '}
+          Profesionální snímky nemovitostí{' '}
           <span style={{
             color: 'var(--accent)',
             position: 'relative' as const,
@@ -138,7 +163,7 @@ export default function Hero() {
         <p className="fade-up fade-up-3" style={{
           fontSize: 'clamp(1rem, 2vw, 1.2rem)',
           color: 'var(--text-secondary)',
-          maxWidth: 520,
+          maxWidth: 560,
           margin: '0 auto 2.5rem',
           fontWeight: 300,
           lineHeight: 1.7,
@@ -150,7 +175,7 @@ export default function Hero() {
         <div className="fade-up fade-up-3" style={{
           display: 'flex', gap: '1rem',
           justifyContent: 'center', flexWrap: 'wrap' as const,
-          marginBottom: '6rem',
+          marginBottom: '5rem',
         }}>
           <a href="#editor" className="btn btn-primary" style={{ fontSize: 14, padding: '0.9rem 2.25rem' }}>
             Vyzkoušet zdarma →
@@ -160,91 +185,57 @@ export default function Hero() {
           </a>
         </div>
 
-        {/* Orbit element */}
-        <div style={{ width: 120, height: 120, margin: '0 auto 4rem', position: 'relative' as const }}>
-          <div style={{
-            position: 'absolute' as const,
-            top: '50%', left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: 40, height: 40,
-            borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(139,92,246,0.9) 0%, rgba(139,92,246,0.2) 60%, transparent 100%)',
-            boxShadow: '0 0 30px rgba(139,92,246,0.6), 0 0 60px rgba(139,92,246,0.3)',
-            animation: 'glowPulse 3s ease-in-out infinite',
-          }} />
-          <div style={{
-            position: 'absolute' as const,
-            top: '50%', left: '50%',
-            width: 80, height: 80,
-            marginTop: -40, marginLeft: -40,
-            borderRadius: '50%',
-            border: '1px solid rgba(139,92,246,0.25)',
-            animation: 'orbit1 6s linear infinite',
-          }}>
-            <div style={{
-              position: 'absolute' as const,
-              top: -3, left: '50%',
-              transform: 'translateX(-50%)',
-              width: 6, height: 6,
-              borderRadius: '50%',
-              background: 'var(--accent)',
-              boxShadow: '0 0 8px rgba(139,92,246,0.8)',
-            }} />
-          </div>
-          <div style={{
-            position: 'absolute' as const,
-            top: '50%', left: '50%',
-            width: 110, height: 110,
-            marginTop: -55, marginLeft: -55,
-            borderRadius: '50%',
-            border: '1px solid rgba(139,92,246,0.12)',
-            animation: 'orbit2 10s linear infinite',
-          }}>
-            <div style={{
-              position: 'absolute' as const,
-              top: -2.5, left: '50%',
-              transform: 'translateX(-50%)',
-              width: 5, height: 5,
-              borderRadius: '50%',
-              background: 'rgba(139,92,246,0.6)',
-            }} />
-            <div style={{
-              position: 'absolute' as const,
-              bottom: -2.5, left: '50%',
-              transform: 'translateX(-50%)',
-              width: 3, height: 3,
-              borderRadius: '50%',
-              background: 'rgba(139,92,246,0.4)',
-            }} />
-          </div>
-        </div>
-
-        {/* Stats */}
+        {/* Animated stats */}
         <div style={{
-          display: 'flex', justifyContent: 'center',
-          gap: '4rem',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'stretch',
+          gap: 0,
           flexWrap: 'wrap' as const,
-          borderTop: '1px solid var(--border)', paddingTop: '3rem',
+          marginTop: '2rem',
+          background: 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(167,139,250,0.03))',
+          border: '1px solid var(--border)',
+          borderRadius: 16,
+          padding: 'clamp(1.5rem, 4vw, 2.5rem)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          maxWidth: 900,
+          margin: '0 auto',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(139,92,246,0.08) inset',
         }}>
-          {[
-            { value: '< 30s', label: 'Doba zpracování' },
-            { value: 'RAW', label: 'Podpora formátů' },
-            { value: 'AI v5', label: 'Model Autoenhance' },
-            { value: '100%', label: 'Automatické' },
-          ].map(stat => (
-            <div key={stat.label} style={{ textAlign: 'center', cursor: 'default' }}>
+          {STATS.map((stat, i) => (
+            <div key={stat.label} style={{
+              flex: '1 1 200px',
+              textAlign: 'center',
+              padding: '0.5rem 1rem',
+              borderRight: i < STATS.length - 1 ? '1px solid var(--border)' : 'none',
+              minWidth: 120,
+            }}>
               <p style={{
-                fontSize: '2rem', fontWeight: 700,
+                fontSize: 'clamp(1.75rem, 4vw, 2.75rem)',
+                fontWeight: 700,
                 background: 'linear-gradient(135deg, #8B5CF6, #A78BFA)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text',
                 letterSpacing: '-0.02em',
                 lineHeight: 1,
+                marginBottom: 8,
               }}>
-                {stat.value}
+                <AnimatedCounter
+                  value={stat.value}
+                  prefix={stat.prefix ?? ''}
+                  suffix={stat.suffix ?? ''}
+                  duration={1500 + i * 200}
+                />
               </p>
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, letterSpacing: '0.05em' }}>
+              <p style={{
+                fontSize: 11,
+                color: 'var(--text-muted)',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase' as const,
+                fontWeight: 600,
+              }}>
                 {stat.label}
               </p>
             </div>
@@ -262,26 +253,6 @@ export default function Hero() {
         @keyframes pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(0.8); }
-        }
-        @keyframes orbit1 {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes orbit2 {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(-360deg); }
-        }
-        @keyframes glowPulse {
-          0%, 100% { 
-            opacity: 1; 
-            transform: translate(-50%, -50%) scale(1); 
-            box-shadow: 0 0 30px rgba(139,92,246,0.7), 0 0 60px rgba(139,92,246,0.3); 
-          }
-          50% { 
-            opacity: 0.6; 
-            transform: translate(-50%, -50%) scale(0.8); 
-            box-shadow: 0 0 15px rgba(139,92,246,0.4), 0 0 30px rgba(139,92,246,0.15); 
-          }
         }
       `}</style>
     </section>

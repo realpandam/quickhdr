@@ -367,56 +367,36 @@ export default function ImageUploader() {
   };
 
   return (
-    <section id="editor" style={{ maxWidth: 1100, margin: '0 auto', padding: '5rem 2rem 2rem' }}>
-      <div className="tag">Editor</div>
-      <h2 style={{
-        fontSize: 'clamp(1.5rem, 3vw, 2.25rem)',
-        fontWeight: 600, letterSpacing: '-0.02em',
-        marginBottom: '2rem', color: 'var(--text-primary)',
+    <section id="editor" className="uploader-section" style={{ maxWidth: 1100, margin: '0 auto', padding: '5rem 2rem 2rem' }}>
+      <h2 className="uploader-title" style={{
+        fontSize: 'clamp(1.75rem, 4vw, 3rem)',
+        fontWeight: 700, letterSpacing: '-0.02em',
+        marginBottom: '2.5rem', color: 'var(--text-primary)',
       }}>
         Nahrajte fotografie
       </h2>
 
       <SettingsPanel settings={settings} onChange={setSettings} disabled={isProcessing} />
 
-      {/* Drop zone */}
+      {/* Drop zone - MODERN */}
       <label
+        className={`dz-modern${isDragging ? ' dz-dragging' : ''}${isProcessing ? ' dz-disabled' : ''}`}
         onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         onMouseEnter={() => { if (!isProcessing) setHoveredDrop(true); }}
         onMouseLeave={() => setHoveredDrop(false)}
-        style={{
-          display: 'flex', flexDirection: 'column' as const,
-          alignItems: 'center', justifyContent: 'center',
-          border: `1px dashed ${isDragging ? 'var(--drop-border-active)' : hoveredDrop ? 'var(--accent)' : 'var(--drop-border)'}`,
-          borderRadius: 'var(--radius)',
-          padding: '3.5rem 2rem',
-          cursor: isProcessing ? 'not-allowed' : 'pointer',
-          background: isDragging ? 'var(--accent-muted)' : 'var(--drop-bg)',
-          opacity: isProcessing ? 0.5 : 1,
-          pointerEvents: isProcessing ? 'none' : 'auto',
-          transition: 'border-color 0.3s, box-shadow 0.3s', marginBottom: '2rem',
-          boxShadow: hoveredDrop && !isProcessing
-            ? '0 20px 60px rgba(139,92,246,0.15), 0 4px 20px rgba(0,0,0,0.2)'
-            : '0 2px 8px rgba(0,0,0,0.1)',
-        }}
       >
-        <div style={{
-          width: 44, height: 44, borderRadius: '50%',
-          background: 'var(--accent-muted)', border: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 20, marginBottom: '1rem',
-        }}>
+        <div className="dz-icon">
           ↑
         </div>
-        <p style={{ fontSize: 15, color: 'var(--text-primary)', marginBottom: '0.4rem', fontWeight: 500 }}>
+        <p className="dz-title">
           {isProcessing ? 'Probíhá zpracování…' : 'Přetáhněte fotografie sem'}
         </p>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+        <p className="dz-subtitle">
           {isProcessing ? 'Počkejte na dokončení zpracování' : 'nebo klikněte pro výběr souborů'}
         </p>
-        <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: '0.75rem', letterSpacing: '0.02em' }}>
+        <p className="dz-formats">
           JPG · PNG · TIFF · WEBP · HEIC · RAW (ARW, CR2, CR3, NEF, DNG…) · max. 200 MB
         </p>
         <input
@@ -435,14 +415,14 @@ export default function ImageUploader() {
       {/* Tabulka */}
       {photos.length > 0 && (
         <>
-          <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+          <div className="upload-table-wrap" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-secondary)' }}>
                   {['Náhled', 'Soubor', 'Stav', 'Průběh', 'Akce'].map(h => (
                     <th key={h} style={{
-                      textAlign: 'left', padding: '0.65rem 1rem',
-                      fontWeight: 600, fontSize: 11, letterSpacing: '0.08em',
+                      textAlign: 'left', padding: '0.75rem 1rem',
+                      fontWeight: 700, fontSize: 11, letterSpacing: '0.1em',
                       textTransform: 'uppercase' as const,
                       color: 'var(--text-muted)', borderBottom: '1px solid var(--border)',
                     }}>
@@ -453,19 +433,21 @@ export default function ImageUploader() {
               </thead>
               <tbody>
                 {photos.map((photo, i) => (
-                  <tr key={photo.id} style={{
+                  <tr key={photo.id} className="upload-row" style={{
                     borderBottom: i < photos.length - 1 ? '1px solid var(--border)' : 'none',
                     background: 'var(--bg)',
+                    transition: 'background 0.2s',
                   }}>
                     {/* Náhled */}
                     <td style={{ padding: '0.75rem 1rem' }}>
                       <div
                         onClick={() => photo.enhancedUrl ? setLightbox(photo.enhancedUrl) : undefined}
                         style={{
-                          width: 60, height: 44, borderRadius: 4, overflow: 'hidden',
+                          width: 60, height: 44, borderRadius: 6, overflow: 'hidden',
                           cursor: photo.enhancedUrl ? 'pointer' : 'default',
                           background: 'var(--bg-secondary)', border: '1px solid var(--border)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'transform 0.2s, border-color 0.2s',
                         }}
                       >
                         {photo.enhancedUrl ? (
@@ -498,7 +480,7 @@ export default function ImageUploader() {
 
                     {/* Stav */}
                     <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' as const }}>
-                      <span style={{ color: statusColor[photo.status] }}>
+                      <span style={{ color: statusColor[photo.status], fontWeight: 500 }}>
                         {photo.error ?? statusLabel[photo.status]}
                       </span>
                     </td>
@@ -506,14 +488,17 @@ export default function ImageUploader() {
                     {/* Progress */}
                     <td style={{ padding: '0.75rem 1rem', minWidth: 140 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ flex: 1, height: 2, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
+                        <div style={{ flex: 1, height: 3, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
                           <div style={{
                             height: '100%', width: `${photo.progress}%`,
-                            background: photo.status === 'done' ? 'var(--progress-done)' : 'var(--progress-fill)',
+                            background: photo.status === 'done'
+                              ? 'var(--progress-done)'
+                              : 'linear-gradient(90deg, #6B47DC, #A78BFA)',
                             transition: 'width 0.3s ease',
+                            boxShadow: photo.status === 'processing' ? '0 0 8px rgba(139,92,246,0.5)' : 'none',
                           }} />
                         </div>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 32, textAlign: 'right' as const }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 32, textAlign: 'right' as const, fontVariantNumeric: 'tabular-nums' }}>
                           {photo.progress}%
                         </span>
                       </div>
@@ -566,9 +551,9 @@ export default function ImageUploader() {
 
       {/* Consent modal */}
       {consentModal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1001, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg-card)', borderRadius: 12, width: 480, padding: '2rem', border: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1001, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)' }}>
+          <div style={{ background: 'var(--bg-card)', borderRadius: 16, width: 480, padding: '2rem', border: '1px solid var(--border)', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
               Před dokončením objednávky
             </h3>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
@@ -602,9 +587,17 @@ export default function ImageUploader() {
 
       {/* Lightbox */}
       {lightbox && (
-        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
-          <img src={lightbox} alt="Náhled" style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 4 }} />
-          <button onClick={() => setLightbox(null)} style={{ position: 'fixed', top: 20, right: 24, background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>✕</button>
+        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out', backdropFilter: 'blur(8px)' }}>
+          <img src={lightbox} alt="Náhled" style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8, boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }} />
+          <button onClick={() => setLightbox(null)} style={{
+            position: 'fixed', top: 20, right: 24,
+            background: 'rgba(255,255,255,0.1)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            color: '#fff', fontSize: 18, cursor: 'pointer',
+            width: 40, height: 40, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(8px)',
+          }}>✕</button>
         </div>
       )}
     </section>
