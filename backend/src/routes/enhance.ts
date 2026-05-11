@@ -566,43 +566,138 @@ router.post('/notify', async (req: Request, res: Response) => {
   }
 });
 
-// ── Helper: email šablona ─────────────────────────────────────────────────────
+// ── Helper: email šablona ────────────────────────────────────────────────────
 function notifyEmailHtml(filename: string, imageId: string, frontendUrl: string): string {
+  const safeName = filename ?? 'bez názvu';
+  const safeRef = filename ?? imageId;
+  const year = new Date().getFullYear();
+
   return `<!DOCTYPE html>
-    <html>
-    <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-    <body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-      <div style="max-width:560px;margin:0 auto;padding:48px 24px;">
-        <p style="font-size:14px;font-weight:600;color:#ffffff;margin:0 0 40px;">FASTHDR</p>
-        <h1 style="font-size:24px;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
-          Zpracování dokončeno ✓
-        </h1>
-        <p style="font-size:15px;color:#888;margin:0 0 32px;line-height:1.6;">
-          Vaše fotografie <strong style="color:#ccc;">${filename ?? 'bez názvu'}</strong>
-          byla úspěšně zpracována pomocí AI. Můžete si prohlédnout náhled a zakoupit plné rozlišení.
-        </p>
-        <a href="${frontendUrl}/dashboard"
-           style="display:inline-block;background:#f59e0b;color:#000;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;text-decoration:none;margin-bottom:32px;">
-          Zobrazit v Moje fotografie →
-        </a>
-        <div style="border:1px solid #222;border-radius:8px;padding:20px;margin-bottom:32px;">
-          <p style="font-size:13px;color:#666;margin:0 0 8px;">
-            <strong style="color:#888;">Soubor:</strong> ${filename ?? imageId}
-          </p>
-          <p style="font-size:13px;color:#666;margin:0 0 8px;">
-            <strong style="color:#888;">Cena:</strong> 59 Kč
-          </p>
-          <p style="font-size:13px;color:#666;margin:0;">
-            <strong style="color:#888;">Podpora:</strong> info@fasthdr.cz
-          </p>
-        </div>
-        <p style="font-size:12px;color:#444;margin:0;line-height:1.6;">
-          © ${new Date().getFullYear()} FASTHDR. Všechna práva vyhrazena.<br>
-          IČO: 23584203 · Drnovec 1, 471 54 Cvikov
-        </p>
-      </div>
-    </body>
-    </html>`;
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <title>Zpracování dokončeno — FastHDR</title>
+</head>
+<body style="margin:0;padding:0;background:#09090F;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;color:#ffffff;-webkit-font-smoothing:antialiased;">
+  <!-- Hidden preheader -->
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#09090F;">
+    Vaše fotografie ${safeName} byla úspěšně zpracována. Prohlédněte si náhled.
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090F;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
+
+          <!-- Logo header -->
+          <tr>
+            <td align="center" style="padding:0 0 32px;">
+              <img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;outline:none;text-decoration:none;">
+            </td>
+          </tr>
+
+          <!-- Hero card -->
+          <tr>
+            <td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;">
+
+              <!-- Status badge -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
+                <tr>
+                  <td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;">
+                    <span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">
+                      ● Zpracováno
+                    </span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Heading -->
+              <h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
+                Vaše fotografie<br>je připravena
+              </h1>
+
+              <!-- Description -->
+              <p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">
+                Soubor <strong style="color:#ffffff;font-weight:600;">${safeName}</strong> byl úspěšně zpracován pomocí AI modelu v5. Prohlédněte si náhled zdarma a stáhněte si výsledek v plném rozlišení.
+              </p>
+
+              <!-- CTA Button -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
+                <tr>
+                  <td style="background:#7B5CF0;border-radius:10px;">
+                    <a href="${frontendUrl}/dashboard"
+                       style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">
+                      Zobrazit fotografii →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Divider -->
+              <div style="height:1px;background:#22222E;margin:0 0 24px;"></div>
+
+              <!-- Detail rows -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Soubor</td>
+                  <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;word-break:break-all;">${safeRef}</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena</td>
+                  <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">59 Kč</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td>
+                  <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření fotografie</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td>
+                  <td style="padding:8px 0;font-size:13px;">
+                    <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Help row -->
+          <tr>
+            <td style="padding:24px 32px 0;">
+              <p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">
+                Potřebujete pomoc? Napište nám na
+                <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:40px 32px 16px;border-top:1px solid #16161F;margin-top:32px;">
+              <p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;">
+                <strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>
+                Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br>
+                <a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a>
+                ·
+                <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a>
+                ·
+                <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a>
+              </p>
+              <p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">
+                © ${year} FASTHDR. Všechna práva vyhrazena.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 export default router;

@@ -41,7 +41,7 @@ async function getAccessToken(): Promise<string> {
 
   const response = await axios.post(
     `${GOPAY_API_URL}/oauth2/token`,
-    'grant_type=client_credentials&scope=payment-create',
+    'grant_type=client_credentials&scope=payment-all',
     {
       auth: {
         username: CLIENT_ID,
