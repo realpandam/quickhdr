@@ -29,57 +29,40 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
 
         const orderId = `ORDER-${image_id}-${Date.now()}`;
 
-        // Smaž staré pending záznamy pro stejný image_id a uživatele
-        // (zabránění duplicitám při opakovaném kliknutí na Koupit)
-        if (user_id) {
-            await supabase
-                .from('orders')
-                .delete()
-                .eq('image_id', image_id)
-                .eq('user_id', user_id)
-                .eq('payment_status', 'pending');
-        }
-
         if (IS_MOCK) {
-            // ── Mock flow ──────────────────────────────────
             const mockPaymentId = `MOCK-${Date.now()}`;
 
-            await supabase.from('orders').insert({
-                image_id,
-                filename: filename ?? '',
-                payment_status: 'pending',
-                amount_czk: PRICE_CZK,
-                user_id: user_id || null,
-                gopay_order_id: orderId,
-                gopay_payment_id: mockPaymentId,
-                email: email || null,
-            });
+            await supabase.from('orders')
+                .update({
+                    gopay_order_id: orderId,
+                    gopay_payment_id: mockPaymentId,
+                    email: email || null,
+                })
+                .eq('image_id', image_id)
+                .eq('payment_status', 'pending');
 
             const mockUrl = `${FRONTEND_URL}/success?image_id=${image_id}&gopay_id=${mockPaymentId}&mock=true`;
             res.json({ url: mockUrl });
 
         } else {
-            // ── GoPay produkční flow ─────────────────────
             const payment = await createPayment({
                 orderId,
                 amount: PRICE_CZK,
                 currency: 'CZK',
-                email: email || '',
+                email: email || 'noreply@fasthdr.cz',
                 description: `FASTHDR — ${filename ?? 'fotografie'}`,
                 returnUrl: `${GOPAY_RETURN_URL}/success?image_id=${image_id}`,
                 notifyUrl: `${process.env.BACKEND_URL || 'https://api.fasthdr.cz'}/api/payments/notify`,
             });
 
-            await supabase.from('orders').insert({
-                image_id,
-                filename: filename ?? '',
-                payment_status: 'pending',
-                amount_czk: PRICE_CZK,
-                user_id: user_id || null,
-                gopay_order_id: orderId,
-                gopay_payment_id: String(payment.id),
-                email: email || null,
-            });
+            await supabase.from('orders')
+                .update({
+                    gopay_order_id: orderId,
+                    gopay_payment_id: String(payment.id),
+                    email: email || null,
+                })
+                .eq('image_id', image_id)
+                .eq('payment_status', 'pending');
 
             res.json({ url: payment.gw_url });
         }

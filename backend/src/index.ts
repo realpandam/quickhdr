@@ -9,6 +9,7 @@ import enhanceRouter from './routes/enhance';
 import paymentsRouter from './routes/payments';
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 4000;
 
 const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:3000')
