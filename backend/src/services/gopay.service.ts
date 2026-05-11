@@ -65,41 +65,46 @@ async function getAccessToken(): Promise<string> {
 export async function createPayment(params: CreatePaymentParams): Promise<GoPayPayment> {
   const token = await getAccessToken();
 
-  const response = await axios.post(
-    `${GOPAY_API_URL}/payments/payment`,
-    {
-      payer: {
-        allowed_payment_instruments: ['PAYMENT_CARD'],
-        contact: {
-          email: params.email || '',
-          first_name: params.firstName || '',
-          last_name: params.lastName || '',
+  try {
+    const response = await axios.post(
+      `${GOPAY_API_URL}/payments/payment`,
+      {
+        payer: {
+          allowed_payment_instruments: ['PAYMENT_CARD'],
+          contact: {
+            email: params.email || '',
+            first_name: params.firstName || '',
+            last_name: params.lastName || '',
+          },
         },
+        target: {
+          type: 'ACCOUNT',
+          goid: GOID,
+        },
+        amount: Math.round(params.amount * 100),
+        currency: params.currency || 'CZK',
+        order_number: params.orderId,
+        order_description: params.description || 'FASTHDR platba',
+        callback: {
+          return_url: params.returnUrl,
+          notification_url: params.notifyUrl,
+        },
+        lang: 'CS',
       },
-      target: {
-        type: 'ACCOUNT',
-        goid: GOID,
-      },
-      amount: Math.round(params.amount * 100), // haléře
-      currency: params.currency || 'CZK',
-      order_number: params.orderId,
-      order_description: params.description || 'FASTHDR platba',
-      callback: {
-        return_url: params.returnUrl,
-        notification_url: params.notifyUrl,
-      },
-      lang: 'CS',
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    }
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      }
+    );
 
-  return response.data;
+    return response.data;
+  } catch (error: any) {
+    console.error('GOPAY RAW ERROR:', JSON.stringify(error?.response?.data));
+    throw error;
+  }
 }
 
 export async function getPaymentStatus(paymentId: string): Promise<GoPayPayment> {
