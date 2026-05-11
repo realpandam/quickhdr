@@ -6,10 +6,11 @@ import { createPayment, getPaymentStatus } from '../services/gopay.service';
 const router = Router();
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
-const PRICE_CZK = 59;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const GOPAY_RETURN_URL = process.env.GOPAY_RETURN_URL || 'https://fasthdr.cz';
+
+const PRICE_CZK = parseInt(process.env.PRICE_CZK || '25');
 
 // Mock flow — zapni přes GOPAY_MOCK=true v Railway nebo automaticky v development
 const IS_MOCK = process.env.GOPAY_MOCK === 'true' || process.env.NODE_ENV !== 'production';
@@ -83,8 +84,8 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
             res.json({ url: payment.gw_url });
         }
 
-    } catch (error) {
-        console.error('Chyba při vytváření platby:', error);
+    } catch (error: any) {
+        console.error('GoPay error:', JSON.stringify(error?.response?.data, null, 2));
         res.status(500).json({ error: 'Nepodařilo se vytvořit platbu' });
     }
 });

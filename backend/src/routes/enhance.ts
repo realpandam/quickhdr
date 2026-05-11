@@ -18,6 +18,8 @@ const API_KEY = process.env.AUTOENHANCE_API_KEY!;
 const API_BASE = 'https://api.autoenhance.ai';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.fasthdr.cz';
 
+const PRICE_CZK = parseInt(process.env.PRICE_CZK || '25');
+
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
 function getMimeType(filename: string, fallback: string): string {
@@ -123,7 +125,7 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
         image_id,
         filename: file.originalname,
         payment_status: 'pending',
-        amount_czk: 59,
+        amount_czk: PRICE_CZK,
         user_id: user_id || null,
         session_id: session_id || null,
         payment_session_id: `pending_${image_id}`,
@@ -263,7 +265,7 @@ router.post('/hdr/order', async (req: Request, res: Response) => {
       image_id: `hdr_pending_${order_id}`, // placeholder — přepíše webhook
       filename: filename || null,
       payment_status: 'pending',
-      amount_czk: 59,
+      amount_czk: PRICE_CZK,
       user_id: user_id || null,
       session_id: session_id || null,
       hdr_order_id: order_id, // nový sloupec pro HDR
@@ -539,7 +541,7 @@ router.post('/notify', async (req: Request, res: Response) => {
         image_id,
         filename: filename && !filename.includes(image_id) ? filename : null,
         payment_status: 'pending',
-        amount_czk: 59,
+        amount_czk: PRICE_CZK,
         user_id,
         payment_session_id: `pending_${image_id}`,
       });
@@ -647,7 +649,7 @@ function notifyEmailHtml(filename: string, imageId: string, frontendUrl: string)
                 </tr>
                 <tr>
                   <td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena</td>
-                  <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">59 Kč</td>
+                  <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td>
                 </tr>
                 <tr>
                   <td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td>

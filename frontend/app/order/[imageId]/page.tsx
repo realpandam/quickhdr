@@ -6,6 +6,8 @@ import { API_URL } from '../../lib/config';
 
 type Status = 'loading' | 'processing' | 'done' | 'error';
 
+const PRICE_CZK = parseInt(process.env.PRICE_CZK || '25');
+
 export default function OrderPage() {
   const params = useParams();
   const imageId = params.imageId as string;
@@ -246,7 +248,7 @@ export default function OrderPage() {
                 className="btn btn-primary"
                 style={{ padding: '10px 24px', fontSize: 14 }}
               >
-                Koupit & Stáhnout — 59 Kč
+                Koupit & Stáhnout — {PRICE_CZK} Kč
               </button>
               <a
                 href="/"

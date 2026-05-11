@@ -15,6 +15,8 @@ const features = [
   'Dostupnost 7 dní po zaplacení',
 ];
 
+const PRICE_CZK = parseInt(process.env.PRICE_CZK || '25');
+
 export default function Pricing() {
   const [hovered, setHovered] = useState(false);
   const [hoveredInfo, setHoveredInfo] = useState(false);
@@ -109,7 +111,7 @@ export default function Pricing() {
                   letterSpacing: '-0.03em',
                   lineHeight: 1,
                 }}>
-                  59
+                  {PRICE_CZK}
                 </span>
                 <span style={{ fontSize: 18, color: 'var(--text-secondary)', fontWeight: 500 }}>
                   Kč
