@@ -9,6 +9,8 @@ const resend = new Resend(process.env.RESEND_API_KEY!);
 const PRICE_CZK = 59;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
+const GOPAY_RETURN_URL = process.env.GOPAY_RETURN_URL || 'https://fasthdr.cz';
+
 // Mock flow — zapni přes GOPAY_MOCK=true v Railway nebo automaticky v development
 const IS_MOCK = process.env.GOPAY_MOCK === 'true' || process.env.NODE_ENV !== 'production';
 
@@ -63,7 +65,7 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
                 currency: 'CZK',
                 email: email || '',
                 description: `FASTHDR — ${filename ?? 'fotografie'}`,
-                returnUrl: `${FRONTEND_URL}/success?image_id=${image_id}`,
+                returnUrl: `${GOPAY_RETURN_URL}/success?image_id=${image_id}`,
                 notifyUrl: `${process.env.BACKEND_URL || 'https://api.fasthdr.cz'}/api/payments/notify`,
             });
 
