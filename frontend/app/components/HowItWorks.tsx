@@ -5,13 +5,13 @@ import { useEffect, useRef, useState } from 'react';
 const steps = [
   {
     number: '01',
-    title: 'Nastavte parametry',
-    description: 'Zvolte typ vylepšení, výměnu oblohy, korekci vertikály a další nastavení přesně podle vašich potřeb.',
+    title: 'Nahrajte fotografii',
+    description: 'Přetáhněte fotografii nebo ji vyberte ze svého zařízení. Podporujeme JPG, PNG, RAW a desítky dalších formátů.',
   },
   {
     number: '02',
-    title: 'Nahrajte fotografii',
-    description: 'Přetáhněte fotografii nebo ji vyberte ze svého zařízení. Podporujeme JPG, PNG, RAW a desítky dalších formátů.',
+    title: 'Nastavte parametry',
+    description: 'Zvolte typ vylepšení, výměnu oblohy, korekci vertikály a další nastavení přesně podle vašich potřeb.',
   },
   {
     number: '03',
@@ -30,7 +30,48 @@ function StepIllustration({ step, active }: { step: number; active: boolean }) {
   const transition = 'opacity 0.5s ease, transform 0.5s ease';
 
   if (step === 0) {
-    // Settings
+    return (
+      <div style={{
+        width: '100%', height: '100%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '2rem',
+      }}>
+        <div style={{
+          width: '85%', height: '70%',
+          border: '2px dashed rgba(139,92,246,0.5)',
+          borderRadius: 16,
+          display: 'flex', flexDirection: 'column' as const,
+          alignItems: 'center', justifyContent: 'center',
+          gap: 12,
+          background: 'rgba(139,92,246,0.04)',
+          position: 'relative' as const,
+          overflow: 'hidden',
+          opacity: o,
+          transition,
+        }}>
+          {active && <div style={{
+            position: 'absolute' as const,
+            left: 0, right: 0, height: 2,
+            background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.9), transparent)',
+            animation: 'scanLine 2.5s linear infinite',
+            top: 0,
+          }} />}
+          <div style={{
+            width: 56, height: 56, borderRadius: 14,
+            background: 'linear-gradient(135deg, rgba(107,71,220,0.3), rgba(167,139,250,0.2))',
+            border: '1px solid rgba(139,92,246,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#A78BFA', fontSize: 24,
+            animation: active ? 'bounceUp 2s ease-in-out infinite' : 'none',
+            boxShadow: '0 8px 24px rgba(139,92,246,0.3)',
+          }}>↑</div>
+          <div style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600 }}>Přetáhněte fotografii</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>JPG · PNG · RAW · max 200MB</div>
+        </div>
+      </div>
+    );
+  }
+  if (step === 1) {
     return (
       <div style={{
         width: '100%', height: '100%',
@@ -48,7 +89,6 @@ function StepIllustration({ step, active }: { step: number; active: boolean }) {
         }}>
           <div style={{ color: 'var(--text-muted)', fontSize: 10, letterSpacing: '0.15em', fontWeight: 700, textTransform: 'uppercase' as const }}>NASTAVENÍ</div>
 
-          {/* Pills row 1 */}
           <div>
             <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginBottom: 6 }}>Typ vylepšení</div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -64,7 +104,6 @@ function StepIllustration({ step, active }: { step: number; active: boolean }) {
             </div>
           </div>
 
-          {/* Toggles */}
           {['Výměna oblohy', 'Korekce vertikály', 'Anonymizace'].map((label, i) => (
             <div key={label} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -92,52 +131,7 @@ function StepIllustration({ step, active }: { step: number; active: boolean }) {
       </div>
     );
   }
-  if (step === 1) {
-    // Upload
-    return (
-      <div style={{
-        width: '100%', height: '100%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '2rem',
-      }}>
-        <div style={{
-          width: '85%', height: '70%',
-          border: '2px dashed rgba(139,92,246,0.5)',
-          borderRadius: 16,
-          display: 'flex', flexDirection: 'column' as const,
-          alignItems: 'center', justifyContent: 'center',
-          gap: 12,
-          background: 'rgba(139,92,246,0.04)',
-          position: 'relative' as const,
-          overflow: 'hidden',
-          opacity: o,
-          transition,
-        }}>
-          {/* Scan line */}
-          {active && <div style={{
-            position: 'absolute' as const,
-            left: 0, right: 0, height: 2,
-            background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.9), transparent)',
-            animation: 'scanLine 2.5s linear infinite',
-            top: 0,
-          }} />}
-          <div style={{
-            width: 56, height: 56, borderRadius: 14,
-            background: 'linear-gradient(135deg, rgba(107,71,220,0.3), rgba(167,139,250,0.2))',
-            border: '1px solid rgba(139,92,246,0.5)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#A78BFA', fontSize: 24,
-            animation: active ? 'bounceUp 2s ease-in-out infinite' : 'none',
-            boxShadow: '0 8px 24px rgba(139,92,246,0.3)',
-          }}>↑</div>
-          <div style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600 }}>Přetáhněte fotografii</div>
-          <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>JPG · PNG · RAW · max 200MB</div>
-        </div>
-      </div>
-    );
-  }
   if (step === 2) {
-    // Processing
     return (
       <div style={{
         width: '100%', height: '100%',
@@ -169,7 +163,6 @@ function StepIllustration({ step, active }: { step: number; active: boolean }) {
       </div>
     );
   }
-  // Download
   return (
     <div style={{
       width: '100%', height: '100%',
@@ -221,7 +214,6 @@ export default function HowItWorks() {
       const rect = sectionRef.current.getBoundingClientRect();
       const total = sectionRef.current.offsetHeight - window.innerHeight;
       const p = Math.max(0, Math.min(1, -rect.top / total));
-      // 4 steps split across 100%
       const idx = Math.min(3, Math.floor(p * 4.5));
       setActiveStep(idx);
     };
@@ -235,12 +227,10 @@ export default function HowItWorks() {
       ref={sectionRef}
       id="jak-to-funguje"
       style={{
-        borderTop: '1px solid var(--border)',
         position: 'relative' as const,
         height: '400vh',
       }}
     >
-      {/* Sticky container */}
       <div style={{
         position: 'sticky' as const,
         top: 0,
@@ -252,17 +242,12 @@ export default function HowItWorks() {
         overflow: 'hidden',
         padding: 'clamp(1rem, 4vw, 3rem) 2rem',
       }}>
-        {/* Ambient glow */}
-        <div style={{
-          position: 'absolute' as const,
-          top: '50%', right: '-10%',
-          transform: 'translateY(-50%)',
-          width: 600, height: 600,
-          background: 'radial-gradient(ellipse, rgba(139,92,246,0.05) 0%, transparent 70%)',
-          pointerEvents: 'none' as const,
-        }} />
-
-        <div style={{ maxWidth: 1200, width: '100%', margin: '0 auto' }}>
+        {/* GLASS CARD wrap kolem celého obsahu */}
+        <div className="glass-card" style={{
+          maxWidth: 1200,
+          width: '100%',
+          padding: 'clamp(2rem, 5vw, 3.5rem)',
+        }}>
           <div style={{ textAlign: 'center' as const, marginBottom: '2.5rem' }}>
             <div className="tag" style={{ marginBottom: '0.75rem' }}>Postup</div>
             <h2 style={{
@@ -274,7 +259,6 @@ export default function HowItWorks() {
             </h2>
           </div>
 
-          {/* Timeline + illustration grid */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.1fr)',
@@ -284,7 +268,6 @@ export default function HowItWorks() {
 
             {/* LEFT — Timeline */}
             <div style={{ position: 'relative' as const, paddingLeft: 24 }}>
-              {/* Vertical line */}
               <div style={{
                 position: 'absolute' as const,
                 left: 11,
@@ -294,7 +277,6 @@ export default function HowItWorks() {
                 background: 'var(--border)',
                 borderRadius: 2,
               }} />
-              {/* Active progress line */}
               <div style={{
                 position: 'absolute' as const,
                 left: 11,
@@ -319,7 +301,6 @@ export default function HowItWorks() {
                     opacity: isFuture ? 0.4 : 1,
                     transition: 'opacity 0.5s ease',
                   }}>
-                    {/* Dot */}
                     <div style={{
                       position: 'absolute' as const,
                       left: -24,
@@ -338,7 +319,6 @@ export default function HowItWorks() {
                     }}>
                       {isCompleted ? '✓' : step.number}
                     </div>
-                    {/* Content */}
                     <div style={{ paddingLeft: 8 }}>
                       <h3 style={{
                         fontSize: isActive ? 18 : 16,
@@ -366,16 +346,11 @@ export default function HowItWorks() {
             </div>
 
             {/* RIGHT — Illustration */}
-            <div style={{
+            <div className="glass-card-soft" style={{
               position: 'relative' as const,
               aspectRatio: '4/3',
-              background: 'linear-gradient(135deg, var(--bg-card), var(--bg-secondary))',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
               overflow: 'hidden',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.4), 0 0 0 1px rgba(139,92,246,0.1) inset',
-            }} className="hiw-illustration">
-              {/* Subtle grid pattern */}
+            }} >
               <div style={{
                 position: 'absolute' as const,
                 inset: 0,
@@ -384,7 +359,6 @@ export default function HowItWorks() {
                 pointerEvents: 'none' as const,
               }} />
 
-              {/* Step illustration */}
               <div style={{
                 position: 'absolute' as const,
                 inset: 0,
@@ -406,7 +380,6 @@ export default function HowItWorks() {
                 ))}
               </div>
 
-              {/* Step badge */}
               <div style={{
                 position: 'absolute' as const,
                 top: 16, left: 16,
@@ -418,6 +391,7 @@ export default function HowItWorks() {
                 borderRadius: 6,
                 textTransform: 'uppercase' as const,
                 boxShadow: '0 4px 12px rgba(107,71,220,0.4)',
+                zIndex: 3,
               }}>
                 Krok {steps[activeStep]?.number}
               </div>
@@ -459,12 +433,6 @@ export default function HowItWorks() {
           .hiw-grid {
             grid-template-columns: 1fr !important;
             gap: 1.5rem !important;
-          }
-          .hiw-illustration {
-            order: -1;
-            max-width: 480px;
-            margin: 0 auto;
-            width: 100%;
           }
         }
       `}</style>

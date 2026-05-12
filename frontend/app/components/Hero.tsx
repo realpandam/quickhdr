@@ -58,7 +58,6 @@ function AnimatedCounter({ value, prefix = '', suffix = '', duration = 2000 }: {
 export default function Hero() {
   const sectionRef = useRef<HTMLElement>(null);
 
-  // Global mouse tracking - nastavuje --mx --my pro mouse-glow přes celou stránku
   useEffect(() => {
     const handleMouse = (e: MouseEvent) => {
       document.documentElement.style.setProperty('--mx', `${e.clientX}px`);
@@ -68,7 +67,6 @@ export default function Hero() {
     return () => window.removeEventListener('mousemove', handleMouse);
   }, []);
 
-  // Inject mouse glow element jen jednou
   useEffect(() => {
     if (!document.querySelector('.mouse-glow')) {
       const glow = document.createElement('div');
@@ -90,7 +88,7 @@ export default function Hero() {
       alignItems: 'center',
       justifyContent: 'center',
     }}>
-      {/* Particles - lokální v Hero */}
+      {/* Particles */}
       <div style={{ position: 'absolute' as const, inset: 0, pointerEvents: 'none', zIndex: 1 }}>
         {PARTICLES.map(p => (
           <div key={p.id} style={{
@@ -108,7 +106,14 @@ export default function Hero() {
         ))}
       </div>
 
-      <div style={{ position: 'relative' as const, zIndex: 2, maxWidth: 1200, margin: '0 auto', width: '100%' }}>
+      {/* GLASS CARD wrap - dělá text čitelným nad blueprintem */}
+      <div className="glass-card" style={{
+        position: 'relative' as const,
+        zIndex: 2,
+        maxWidth: 1100,
+        width: '100%',
+        padding: 'clamp(2.5rem, 6vw, 4.5rem) clamp(1.5rem, 4vw, 3rem)',
+      }}>
         {/* Badge */}
         <div className="fade-up fade-up-1" style={{
           display: 'inline-flex',
@@ -175,7 +180,7 @@ export default function Hero() {
         <div className="fade-up fade-up-3" style={{
           display: 'flex', gap: '1rem',
           justifyContent: 'center', flexWrap: 'wrap' as const,
-          marginBottom: '5rem',
+          marginBottom: '3rem',
         }}>
           <a href="#editor" className="btn btn-primary" style={{ fontSize: 14, padding: '0.9rem 2.25rem' }}>
             Vyzkoušet zdarma →
@@ -185,23 +190,18 @@ export default function Hero() {
           </a>
         </div>
 
-        {/* Animated stats */}
+        {/* Stats - jsou uvnitř glass karty bez vlastního pozadí */}
         <div style={{
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'stretch',
           gap: 0,
           flexWrap: 'wrap' as const,
-          marginTop: '2rem',
-          background: 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(167,139,250,0.03))',
-          border: '1px solid var(--border)',
-          borderRadius: 16,
-          padding: 'clamp(1.5rem, 4vw, 2.5rem)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
+          marginTop: '1rem',
+          borderTop: '1px solid var(--border)',
+          paddingTop: '2rem',
           maxWidth: 900,
-          margin: '0 auto',
-          boxShadow: '0 24px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(139,92,246,0.08) inset',
+          margin: '1rem auto 0',
         }}>
           {STATS.map((stat, i) => (
             <div key={stat.label} style={{

@@ -1,0 +1,187 @@
+/* ============ DROP ZONE ============ */
+
+.dz-modern {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.04), rgba(167, 139, 250, 0.02)) !important;
+  border: 2px dashed rgba(139, 92, 246, 0.3) !important;
+  border-radius: 20px !important;
+  padding: clamp(3rem, 6vw, 5rem) clamp(1.5rem, 4vw, 3rem) !important;
+  position: relative !important;
+  overflow: hidden !important;
+  cursor: pointer !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(139, 92, 246, 0.08) inset !important;
+  margin-bottom: 2rem !important;
+}
+
+.dz-modern:hover {
+  border-color: rgba(139, 92, 246, 0.6) !important;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(167, 139, 250, 0.04)) !important;
+  transform: scale(1.005);
+  box-shadow: 0 32px 80px rgba(139, 92, 246, 0.15), 0 0 0 1px rgba(139, 92, 246, 0.2) inset !important;
+}
+
+.dz-modern.dz-dragging {
+  border-color: var(--accent) !important;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(167, 139, 250, 0.08)) !important;
+  transform: scale(1.01);
+  box-shadow: 0 32px 80px rgba(139, 92, 246, 0.25), 0 0 0 2px rgba(139, 92, 246, 0.4) inset !important;
+}
+
+.dz-modern.dz-disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+}
+
+.dz-modern::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.7), transparent);
+  animation: dzScan 4s linear infinite;
+  top: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes dzScan {
+  from { top: 0; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  to { top: 100%; opacity: 0; }
+}
+
+.dz-modern::after {
+  content: '';
+  position: absolute;
+  top: -100px;
+  right: -100px;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.dz-modern > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* ============ DROP ZONE INNER ============ */
+
+.dz-icon {
+  width: 80px !important;
+  height: 80px !important;
+  border-radius: 22px !important;
+  background: linear-gradient(135deg, rgba(107, 71, 220, 0.25), rgba(167, 139, 250, 0.18)) !important;
+  border: 1px solid rgba(139, 92, 246, 0.5) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 36px !important;
+  margin-bottom: 1.5rem !important;
+  color: #A78BFA !important;
+  box-shadow: 0 12px 32px rgba(139, 92, 246, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+  animation: dzIconFloat 3s ease-in-out infinite !important;
+  position: relative !important;
+}
+
+.dz-icon::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 26px;
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  animation: dzRipple 2.5s ease-out infinite;
+  pointer-events: none;
+}
+
+.dz-icon::after {
+  content: '';
+  position: absolute;
+  inset: -16px;
+  border-radius: 30px;
+  border: 1px solid rgba(139, 92, 246, 0.12);
+  animation: dzRipple 2.5s ease-out 0.5s infinite;
+  pointer-events: none;
+}
+
+@keyframes dzRipple {
+  0% { opacity: 0.7; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+
+@keyframes dzIconFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.dz-title {
+  font-size: clamp(1.1rem, 2.5vw, 1.5rem) !important;
+  font-weight: 700 !important;
+  color: var(--text-primary) !important;
+  margin-bottom: 0.4rem !important;
+  letter-spacing: -0.02em !important;
+}
+
+.dz-subtitle {
+  font-size: 14px !important;
+  color: var(--text-secondary) !important;
+  margin-bottom: 1rem !important;
+}
+
+.dz-formats {
+  font-size: 12px !important;
+  color: var(--text-muted) !important;
+  max-width: 480px !important;
+  text-align: center !important;
+  line-height: 1.6 !important;
+  letter-spacing: 0.02em !important;
+}
+
+/* ============ TABLE ============ */
+
+.upload-table-wrap {
+  background: var(--bg-card);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(139, 92, 246, 0.05) inset;
+}
+
+.upload-row:hover {
+  background: var(--bg-secondary) !important;
+}
+
+.upload-row:hover td > div {
+  border-color: rgba(139, 92, 246, 0.3);
+  transform: scale(1.03);
+}
+
+/* ============ UPLOADER TITLE ============ */
+
+.uploader-title {
+  background: linear-gradient(135deg, var(--text-primary) 0%, rgba(167, 139, 250, 0.9) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  display: inline-block;
+}
+
+/* ============ RESPONSIVE ============ */
+
+@media (max-width: 600px) {
+  .dz-modern {
+    padding: 2.5rem 1.5rem !important;
+  }
+  .dz-icon {
+    width: 64px !important;
+    height: 64px !important;
+    font-size: 28px !important;
+  }
+}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { API_URL } from '../lib/config';
+import '../styles/ImageUploader-styles.css';
 import { supabase } from '../lib/supabase';
 import CloudPicker from './CloudPicker';
 import ConsentCheckboxes from './ConsentCheckboxes';
@@ -368,186 +369,190 @@ export default function ImageUploader() {
 
   return (
     <section id="editor" className="uploader-section" style={{ maxWidth: 1100, margin: '0 auto', padding: '5rem 2rem 2rem' }}>
-      <h2 className="uploader-title" style={{
-        fontSize: 'clamp(1.75rem, 4vw, 3rem)',
-        fontWeight: 700, letterSpacing: '-0.02em',
-        marginBottom: '2.5rem', color: 'var(--text-primary)',
-      }}>
-        Nahrajte fotografie
-      </h2>
+      {/* GLASS CARD - obaluje vše pro čitelnost nad blueprintem */}
+      <div className="glass-card" style={{ padding: 'clamp(2rem, 5vw, 3.5rem)' }}>
+        <h2 className="uploader-title" style={{
+          fontSize: 'clamp(1.75rem, 4vw, 3rem)',
+          fontWeight: 700, letterSpacing: '-0.02em',
+          marginBottom: '2.5rem', color: 'var(--text-primary)',
+        }}>
+          Nahrajte fotografie
+        </h2>
 
-      <SettingsPanel settings={settings} onChange={setSettings} disabled={isProcessing} />
+        <SettingsPanel settings={settings} onChange={setSettings} disabled={isProcessing} />
 
-      {/* Drop zone - MODERN */}
-      <label
-        className={`dz-modern${isDragging ? ' dz-dragging' : ''}${isProcessing ? ' dz-disabled' : ''}`}
-        onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
-        onMouseEnter={() => { if (!isProcessing) setHoveredDrop(true); }}
-        onMouseLeave={() => setHoveredDrop(false)}
-      >
-        <div className="dz-icon">
-          ↑
+        {/* Drop zone */}
+        <label
+          className={`dz-modern${isDragging ? ' dz-dragging' : ''}${isProcessing ? ' dz-disabled' : ''}`}
+          onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={handleDrop}
+          onMouseEnter={() => { if (!isProcessing) setHoveredDrop(true); }}
+          onMouseLeave={() => setHoveredDrop(false)}
+        >
+          <div className="dz-icon">
+            ↑
+          </div>
+          <p className="dz-title">
+            {isProcessing ? 'Probíhá zpracování…' : 'Přetáhněte fotografie sem'}
+          </p>
+          <p className="dz-subtitle">
+            {isProcessing ? 'Počkejte na dokončení zpracování' : 'nebo klikněte pro výběr souborů'}
+          </p>
+          <p className="dz-formats">
+            JPG · PNG · TIFF · WEBP · HEIC · RAW (ARW, CR2, CR3, NEF, DNG…) · max. 200 MB
+          </p>
+          <input
+            type="file" multiple
+            accept="image/*,.arw,.cr3,.cr2,.crw,.nef,.nrw,.sr2,.srf,.raf,.orf,.rw2,.pef,.kdc,.erf,.dng,.iiq,.mos,.mef,.fff,.3fr,.x3f,.rwl,.srw"
+            onChange={handleFileInput}
+            disabled={isProcessing}
+            style={{ display: 'none' }}
+          />
+        </label>
+
+        <div>
+          <CloudPicker onFiles={(files) => { if (!isProcessing) addFiles(files); }} />
         </div>
-        <p className="dz-title">
-          {isProcessing ? 'Probíhá zpracování…' : 'Přetáhněte fotografie sem'}
-        </p>
-        <p className="dz-subtitle">
-          {isProcessing ? 'Počkejte na dokončení zpracování' : 'nebo klikněte pro výběr souborů'}
-        </p>
-        <p className="dz-formats">
-          JPG · PNG · TIFF · WEBP · HEIC · RAW (ARW, CR2, CR3, NEF, DNG…) · max. 200 MB
-        </p>
-        <input
-          type="file" multiple
-          accept="image/*,.arw,.cr3,.cr2,.crw,.nef,.nrw,.sr2,.srf,.raf,.orf,.rw2,.pef,.kdc,.erf,.dng,.iiq,.mos,.mef,.fff,.3fr,.x3f,.rwl,.srw"
-          onChange={handleFileInput}
-          disabled={isProcessing}
-          style={{ display: 'none' }}
-        />
-      </label>
 
-      <div style={{ marginBottom: '2rem' }}>
-        <CloudPicker onFiles={(files) => { if (!isProcessing) addFiles(files); }} />
-      </div>
-
-      {/* Tabulka */}
-      {photos.length > 0 && (
-        <>
-          <div className="upload-table-wrap" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: 'var(--bg-secondary)' }}>
-                  {['Náhled', 'Soubor', 'Stav', 'Průběh', 'Akce'].map(h => (
-                    <th key={h} style={{
-                      textAlign: 'left', padding: '0.75rem 1rem',
-                      fontWeight: 700, fontSize: 11, letterSpacing: '0.1em',
-                      textTransform: 'uppercase' as const,
-                      color: 'var(--text-muted)', borderBottom: '1px solid var(--border)',
-                    }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {photos.map((photo, i) => (
-                  <tr key={photo.id} className="upload-row" style={{
-                    borderBottom: i < photos.length - 1 ? '1px solid var(--border)' : 'none',
-                    background: 'var(--bg)',
-                    transition: 'background 0.2s',
-                  }}>
-                    {/* Náhled */}
-                    <td style={{ padding: '0.75rem 1rem' }}>
-                      <div
-                        onClick={() => photo.enhancedUrl ? setLightbox(photo.enhancedUrl) : undefined}
-                        style={{
-                          width: 60, height: 44, borderRadius: 6, overflow: 'hidden',
-                          cursor: photo.enhancedUrl ? 'pointer' : 'default',
-                          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          transition: 'transform 0.2s, border-color 0.2s',
-                        }}
-                      >
-                        {photo.enhancedUrl ? (
-                          <img src={photo.enhancedUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <span style={{ fontSize: 20, opacity: 0.3 }}>🖼️</span>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* Soubor */}
-                    <td style={{ padding: '0.75rem 1rem', maxWidth: 220 }}>
-                      <p style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
-                        {photo.file.name}
-                      </p>
-                      {photo.hdr_group_id && (
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
-                          textTransform: 'uppercase' as const, color: 'var(--accent)',
-                          background: 'var(--accent-muted)', border: '1px solid var(--accent-glow)',
-                          padding: '1px 6px', borderRadius: 999, marginTop: 3, display: 'inline-block',
-                        }}>
-                          HDR
-                        </span>
-                      )}
-                      <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                        {(photo.file.size / (1024 * 1024)).toFixed(1)} MB
-                      </p>
-                    </td>
-
-                    {/* Stav */}
-                    <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' as const }}>
-                      <span style={{ color: statusColor[photo.status], fontWeight: 500 }}>
-                        {photo.error ?? statusLabel[photo.status]}
-                      </span>
-                    </td>
-
-                    {/* Progress */}
-                    <td style={{ padding: '0.75rem 1rem', minWidth: 140 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ flex: 1, height: 3, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
-                          <div style={{
-                            height: '100%', width: `${photo.progress}%`,
-                            background: photo.status === 'done'
-                              ? 'var(--progress-done)'
-                              : 'linear-gradient(90deg, #6B47DC, #A78BFA)',
-                            transition: 'width 0.3s ease',
-                            boxShadow: photo.status === 'processing' ? '0 0 8px rgba(139,92,246,0.5)' : 'none',
-                          }} />
-                        </div>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 32, textAlign: 'right' as const, fontVariantNumeric: 'tabular-nums' }}>
-                          {photo.progress}%
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Akce */}
-                    <td style={{ padding: '0.75rem 1rem' }}>
-                      {photo.status === 'done' && photo.enhancedUrl ? (
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button onClick={() => setLightbox(photo.enhancedUrl!)} className="btn" style={{ padding: '4px 10px', fontSize: 12 }}>
-                            Náhled
-                          </button>
-                          <button
-                            onClick={async () => {
-                              const hasConsent = await checkConsent();
-                              if (hasConsent) {
-                                handleCheckout(photo);
-                              } else {
-                                setConsentModal(photo);
-                              }
-                            }}
-                            className="btn btn-primary"
-                            style={{ padding: '4px 10px', fontSize: 12 }}
-                            disabled={checkoutLoading}
-                          >
-                            {checkoutLoading ? 'Načítám…' : 'Koupit & Stáhnout'}
-                          </button>
-                        </div>
-                      ) : photo.status === 'processing' ? (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          Pošleme email až bude hotovo
-                        </span>
-                      ) : photo.status === 'done' && photo.hdr_group_id ? (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sloučeno do HDR</span>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
-                      )}
-                    </td>
+        {/* Tabulka */}
+        {photos.length > 0 && (
+          <>
+            <div className="upload-table-wrap" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-secondary)' }}>
+                    {['Náhled', 'Soubor', 'Stav', 'Průběh', 'Akce'].map(h => (
+                      <th key={h} style={{
+                        textAlign: 'left', padding: '0.75rem 1rem',
+                        fontWeight: 700, fontSize: 11, letterSpacing: '0.1em',
+                        textTransform: 'uppercase' as const,
+                        color: 'var(--text-muted)', borderBottom: '1px solid var(--border)',
+                      }}>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {photos.map((photo, i) => (
+                    <tr key={photo.id} className="upload-row" style={{
+                      borderBottom: i < photos.length - 1 ? '1px solid var(--border)' : 'none',
+                      background: 'var(--bg)',
+                      transition: 'background 0.2s',
+                    }}>
+                      {/* Náhled */}
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        <div
+                          onClick={() => photo.enhancedUrl ? setLightbox(photo.enhancedUrl) : undefined}
+                          style={{
+                            width: 60, height: 44, borderRadius: 6, overflow: 'hidden',
+                            cursor: photo.enhancedUrl ? 'pointer' : 'default',
+                            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'transform 0.2s, border-color 0.2s',
+                          }}
+                        >
+                          {photo.enhancedUrl ? (
+                            <img src={photo.enhancedUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <span style={{ fontSize: 20, opacity: 0.3 }}>🖼️</span>
+                          )}
+                        </div>
+                      </td>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-            <button onClick={handleReset} className="btn">Vymazat vše</button>
-          </div>
-        </>
-      )}
+                      {/* Soubor */}
+                      <td style={{ padding: '0.75rem 1rem', maxWidth: 220 }}>
+                        <p style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
+                          {photo.file.name}
+                        </p>
+                        {photo.hdr_group_id && (
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
+                            textTransform: 'uppercase' as const, color: 'var(--accent)',
+                            background: 'var(--accent-muted)', border: '1px solid var(--accent-glow)',
+                            padding: '1px 6px', borderRadius: 999, marginTop: 3, display: 'inline-block',
+                          }}>
+                            HDR
+                          </span>
+                        )}
+                        <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {(photo.file.size / (1024 * 1024)).toFixed(1)} MB
+                        </p>
+                      </td>
+
+                      {/* Stav */}
+                      <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' as const }}>
+                        <span style={{ color: statusColor[photo.status], fontWeight: 500 }}>
+                          {photo.error ?? statusLabel[photo.status]}
+                        </span>
+                      </td>
+
+                      {/* Progress */}
+                      <td style={{ padding: '0.75rem 1rem', minWidth: 140 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ flex: 1, height: 3, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%', width: `${photo.progress}%`,
+                              background: photo.status === 'done'
+                                ? 'var(--progress-done)'
+                                : 'linear-gradient(90deg, #6B47DC, #A78BFA)',
+                              transition: 'width 0.3s ease',
+                              boxShadow: photo.status === 'processing' ? '0 0 8px rgba(139,92,246,0.5)' : 'none',
+                            }} />
+                          </div>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 32, textAlign: 'right' as const, fontVariantNumeric: 'tabular-nums' }}>
+                            {photo.progress}%
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Akce */}
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        {photo.status === 'done' && photo.enhancedUrl ? (
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button onClick={() => setLightbox(photo.enhancedUrl!)} className="btn" style={{ padding: '4px 10px', fontSize: 12 }}>
+                              Náhled
+                            </button>
+                            <button
+                              onClick={async () => {
+                                const hasConsent = await checkConsent();
+                                if (hasConsent) {
+                                  handleCheckout(photo);
+                                } else {
+                                  setConsentModal(photo);
+                                }
+                              }}
+                              className="btn btn-primary"
+                              style={{ padding: '4px 10px', fontSize: 12 }}
+                              disabled={checkoutLoading}
+                            >
+                              {checkoutLoading ? 'Načítám…' : 'Koupit & Stáhnout'}
+                            </button>
+                          </div>
+                        ) : photo.status === 'processing' ? (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            Pošleme email až bude hotovo
+                          </span>
+                        ) : photo.status === 'done' && photo.hdr_group_id ? (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sloučeno do HDR</span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button onClick={handleReset} className="btn">Vymazat vše</button>
+            </div>
+          </>
+        )}
+
+      </div>{/* /glass-card */}
 
       {/* Consent modal */}
       {consentModal && (
