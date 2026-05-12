@@ -1,5 +1,6 @@
 'use client';
 
+import { Turnstile } from '@marsidev/react-turnstile';
 import { useEffect, useState } from 'react';
 import { API_URL } from '../lib/config';
 import { supabase } from '../lib/supabase';
@@ -54,7 +55,7 @@ async function saveConsent(token: string) {
       },
     });
   } catch {
-    // Souhlas není kritický pro přihlášení — ignoruj chybu
+    // Souhlas není kritický pro přihlášení
   }
 }
 
@@ -70,6 +71,8 @@ export default function LoginPage() {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
   const [agreedToConsent, setAgreedToConsent] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileKey, setTurnstileKey] = useState(0); // pro reset widgetu
 
   const [submitCount, setSubmitCount] = useState(0);
   const [lastSubmit, setLastSubmit] = useState<number>(0);
@@ -119,10 +122,12 @@ export default function LoginPage() {
     } else if (!validateEmail(email)) {
       errs.email = 'Zadejte platný email.';
     }
-    if (!password) {
-      errs.password = 'Heslo je povinné.';
-    } else if (mode === 'register' && password.length < 6) {
-      errs.password = 'Heslo musí mít alespoň 6 znaků.';
+    if (mode !== 'forgot') {
+      if (!password) {
+        errs.password = 'Heslo je povinné.';
+      } else if (mode === 'register' && password.length < 6) {
+        errs.password = 'Heslo musí mít alespoň 6 znaků.';
+      }
     }
     if (mode === 'register' && password !== confirmPassword) {
       errs.confirmPassword = 'Hesla se neshodují.';
@@ -136,6 +141,11 @@ export default function LoginPage() {
   const handleBlur = (field: string) => {
     setTouched(prev => ({ ...prev, [field]: true }));
     setErrors(validate());
+  };
+
+  const resetTurnstile = () => {
+    setTurnstileToken(null);
+    setTurnstileKey(k => k + 1); // force remount widgetu
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -161,6 +171,11 @@ export default function LoginPage() {
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
+    if (!turnstileToken) {
+      setMessage({ text: 'Prosím potvrďte, že nejste robot.', type: 'error' });
+      return;
+    }
+
     if (rememberEmail) {
       localStorage.setItem('savedEmail', email);
     } else {
@@ -172,10 +187,13 @@ export default function LoginPage() {
 
     try {
       if (mode === 'register') {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { captchaToken: turnstileToken },
+        });
         if (error) throw error;
 
-        // Ulož souhlas přes backend pokud máme session
         if (data.session?.access_token) {
           await saveConsent(data.session.access_token);
         }
@@ -185,13 +203,19 @@ export default function LoginPage() {
         setPassword('');
         setConfirmPassword('');
         setAgreedToConsent(false);
+        resetTurnstile();
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+          options: { captchaToken: turnstileToken },
+        });
         if (error) throw error;
         window.location.href = returnTo;
       }
     } catch (err: any) {
       setMessage({ text: translateError(err.message ?? 'Něco se pokazilo'), type: 'error' });
+      resetTurnstile();
     } finally {
       setLoading(false);
     }
@@ -241,6 +265,7 @@ export default function LoginPage() {
     setPassword('');
     setConfirmPassword('');
     setAgreedToConsent(false);
+    resetTurnstile();
   };
 
   const inputStyle = (field: keyof FormErrors): React.CSSProperties => ({
@@ -261,6 +286,8 @@ export default function LoginPage() {
     color: 'var(--accent)',
     textDecoration: 'underline',
   };
+
+  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
 
   return (
     <main style={{
@@ -291,52 +318,55 @@ export default function LoginPage() {
             letterSpacing: '-0.01em', color: 'var(--text-primary)',
             marginBottom: '0.5rem',
           }}>
-            {mode === 'login' ? 'Přihlásit se' : 'Vytvořit účet'}
+            {mode === 'login' ? 'Přihlásit se' : mode === 'register' ? 'Vytvořit účet' : 'Reset hesla'}
           </h1>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
             {mode === 'login'
               ? 'Přihlaste se pro přístup k vašim fotografiím.'
-              : 'Vytvořte si účet a ukládejte upravené fotografie.'}
+              : mode === 'register'
+                ? 'Vytvořte si účet a ukládejte upravené fotografie.'
+                : 'Pošleme vám odkaz pro reset hesla.'}
           </p>
 
-          {/* OAuth */}
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.5rem', marginBottom: '1.5rem' }}>
-            <button onClick={handleGoogle} disabled={loading} className="btn" style={{
-              width: '100%', justifyContent: 'center', padding: '0.65rem', fontSize: 13, gap: 8,
-            }}>
-              <svg width="16" height="16" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-              </svg>
-              Pokračovat s Google
-            </button>
+          {/* OAuth — pouze pro login a register */}
+          {mode !== 'forgot' && (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.5rem', marginBottom: '1.5rem' }}>
+                <button onClick={handleGoogle} disabled={loading} className="btn" style={{
+                  width: '100%', justifyContent: 'center', padding: '0.65rem', fontSize: 13, gap: 8,
+                }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                  </svg>
+                  Pokračovat s Google
+                </button>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' as const, lineHeight: 1.5 }}>
+                  Pokračováním souhlasíte s{' '}
+                  <a href="/podminky" target="_blank" rel="noopener noreferrer" style={linkStyle}>VOP</a>
+                  {' '}a{' '}
+                  <a href="/ochrana-soukromi" target="_blank" rel="noopener noreferrer" style={linkStyle}>Zásadami ochrany osobních údajů</a>.
+                </p>
+              </div>
 
-            {/* Informační text pro Google OAuth */}
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' as const, lineHeight: 1.5 }}>
-              Pokračováním souhlasíte s{' '}
-              <a href="/podminky" target="_blank" rel="noopener noreferrer" style={linkStyle}>VOP</a>
-              {' '}a{' '}
-              <a href="/ochrana-soukromi" target="_blank" rel="noopener noreferrer" style={linkStyle}>Zásadami ochrany osobních údajů</a>.
-            </p>
-          </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>nebo</span>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              </div>
+            </>
+          )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>nebo</span>
-            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          </div>
-
+          {/* Forgot password form */}
           {mode === 'forgot' ? (
             <form onSubmit={handleForgotPassword} style={{ display: 'flex', flexDirection: 'column' as const, gap: '1rem' }}>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                 Zadejte váš email a my vám pošleme odkaz pro reset hesla.
               </p>
               <div>
-                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-                  Email
-                </label>
+                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Email</label>
                 <input
                   type="email"
                   value={email}
@@ -376,12 +406,11 @@ export default function LoginPage() {
               </button>
             </form>
           ) : (
+            /* Login / Register form */
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column' as const, gap: '1rem' }}>
               {/* Email */}
               <div>
-                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-                  Email
-                </label>
+                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Email</label>
                 <input
                   type="email"
                   value={email}
@@ -408,9 +437,7 @@ export default function LoginPage() {
 
               {/* Heslo */}
               <div>
-                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-                  Heslo
-                </label>
+                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Heslo</label>
                 <div style={{ position: 'relative' as const }}>
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -440,7 +467,6 @@ export default function LoginPage() {
                 {touched.password && errors.password && (
                   <p style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>{errors.password}</p>
                 )}
-
                 {mode === 'register' && password && strength && (
                   <div style={{ marginTop: 8 }}>
                     <div style={{ height: 3, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
@@ -459,9 +485,7 @@ export default function LoginPage() {
               {/* Potvrzení hesla */}
               {mode === 'register' && (
                 <div>
-                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-                    Potvrdit heslo
-                  </label>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Potvrdit heslo</label>
                   <div style={{ position: 'relative' as const }}>
                     <input
                       type={showConfirm ? 'text' : 'password'}
@@ -490,7 +514,7 @@ export default function LoginPage() {
                 </div>
               )}
 
-              {/* Souhlas — pouze při registraci */}
+              {/* Souhlas */}
               {mode === 'register' && (
                 <div style={{
                   padding: '0.75rem',
@@ -498,35 +522,39 @@ export default function LoginPage() {
                   borderRadius: 'var(--radius)',
                   border: `1px solid ${touched.consent && errors.consent ? '#ef4444' : 'var(--border)'}`,
                 }}>
-                  <label style={{
-                    display: 'flex', alignItems: 'flex-start', gap: '0.6rem',
-                    cursor: 'pointer',
-                  }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={agreedToConsent}
-                      onChange={e => {
-                        setAgreedToConsent(e.target.checked);
-                        if (touched.consent) setErrors(validate());
-                      }}
+                      onChange={e => { setAgreedToConsent(e.target.checked); if (touched.consent) setErrors(validate()); }}
                       style={{ marginTop: 2, accentColor: 'var(--accent)', flexShrink: 0 }}
                     />
                     <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                       Souhlasím s{' '}
-                      <a href="/podminky" target="_blank" rel="noopener noreferrer" style={linkStyle}>
-                        Všeobecnými obchodními podmínkami
-                      </a>
+                      <a href="/podminky" target="_blank" rel="noopener noreferrer" style={linkStyle}>Všeobecnými obchodními podmínkami</a>
                       {' '}a{' '}
-                      <a href="/ochrana-soukromi" target="_blank" rel="noopener noreferrer" style={linkStyle}>
-                        Zásadami ochrany osobních údajů
-                      </a>
-                      . Beru na vědomí, že platba za provedenou úpravu je konečná a nevratná s výjimkou prokazatelného technického selhání.{' '}
+                      <a href="/ochrana-soukromi" target="_blank" rel="noopener noreferrer" style={linkStyle}>Zásadami ochrany osobních údajů</a>.
+                      {' '}Beru na vědomí, že platba za provedenou úpravu je konečná a nevratná s výjimkou prokazatelného technického selhání.{' '}
                       <span style={{ color: '#ef4444' }}>*</span>
                     </span>
                   </label>
                   {touched.consent && errors.consent && (
                     <p style={{ fontSize: 11, color: '#ef4444', marginTop: 6, marginLeft: 22 }}>{errors.consent}</p>
                   )}
+                </div>
+              )}
+
+              {/* Turnstile captcha */}
+              {siteKey && (
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <Turnstile
+                    key={turnstileKey}
+                    siteKey={siteKey}
+                    onSuccess={setTurnstileToken}
+                    onExpire={resetTurnstile}
+                    onError={resetTurnstile}
+                    options={{ language: 'cs', theme: 'dark' }}
+                  />
                 </div>
               )}
 
@@ -546,12 +574,12 @@ export default function LoginPage() {
 
               <button
                 type="submit"
-                disabled={loading || blocked}
+                disabled={loading || blocked || !turnstileToken}
                 className="btn btn-primary"
                 style={{
                   width: '100%', justifyContent: 'center',
                   padding: '0.7rem', fontSize: 14, marginTop: 4,
-                  opacity: loading || blocked ? 0.7 : 1,
+                  opacity: loading || blocked || !turnstileToken ? 0.7 : 1,
                 }}
               >
                 {blocked
@@ -564,15 +592,17 @@ export default function LoginPage() {
           )}
 
           {/* Přepnutí módu */}
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' as const, marginTop: '1.25rem' }}>
-            {mode === 'login' ? 'Nemáte účet?' : 'Již máte účet?'}{' '}
-            <button
-              onClick={switchMode}
-              style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 13, cursor: 'pointer', padding: 0 }}
-            >
-              {mode === 'login' ? 'Registrovat se' : 'Přihlásit se'}
-            </button>
-          </p>
+          {mode !== 'forgot' && (
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' as const, marginTop: '1.25rem' }}>
+              {mode === 'login' ? 'Nemáte účet?' : 'Již máte účet?'}{' '}
+              <button
+                onClick={switchMode}
+                style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 13, cursor: 'pointer', padding: 0 }}
+              >
+                {mode === 'login' ? 'Registrovat se' : 'Přihlásit se'}
+              </button>
+            </p>
+          )}
         </div>
       </div>
     </main>

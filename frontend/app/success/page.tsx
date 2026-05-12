@@ -7,7 +7,8 @@ import { API_URL } from '../lib/config';
 function SuccessContent() {
   const searchParams = useSearchParams();
   const image_id = searchParams.get('image_id');
-  const gopay_id = searchParams.get('gopay_id');
+  const gopay_id = searchParams.get('gopay_id') || searchParams.get('id');
+  
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
