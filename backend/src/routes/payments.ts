@@ -120,8 +120,11 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
 
         const payment = await getPaymentStatus(paymentId);
 
-        if (payment.state !== 'PAID') {
-            res.status(402).json({ error: 'Platba nebyla dokončena' });
+        console.log('GoPay state:', payment.state);
+        const isPaid = payment.state === 'PAID' || payment.state === 'AUTHORIZED';
+
+        if (!isPaid) {
+            res.status(402).json({ error: 'Platba nebyla dokončena', state: payment.state });
             return;
         }
 
