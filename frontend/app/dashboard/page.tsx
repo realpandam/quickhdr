@@ -29,7 +29,7 @@ export default function DashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'paid' | 'pending'>('all');
-  const [sort, setSort] = useState<'newest' | 'oldest' | 'price'>('newest');
+  const [sort, setSort] = useState<'newest' | 'oldest' | 'az' | 'za'>('newest');
   const [search, setSearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [page, setPage] = useState(1);
@@ -107,7 +107,8 @@ export default function DashboardPage() {
     })
     .sort((a, b) => {
       if (sort === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      if (sort === 'price') return b.amount_czk - a.amount_czk;
+      if (sort === 'az') return (a.filename ?? '').localeCompare(b.filename ?? '');
+      if (sort === 'za') return (b.filename ?? '').localeCompare(a.filename ?? '');
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
@@ -174,9 +175,10 @@ export default function DashboardPage() {
   } as React.CSSProperties);
 
   const sortOptions = [
-    { value: 'newest', label: 'Nejnovější', icon: '↓' },
-    { value: 'oldest', label: 'Nejstarší', icon: '↑' },
-    { value: 'price', label: 'Cena', icon: '₿' },
+    { value: 'newest', label: 'Nejnovější' },
+    { value: 'oldest', label: 'Nejstarší' },
+    { value: 'az', label: 'A → Z' },
+    { value: 'za', label: 'Z → A' },
   ];
 
   return (
@@ -278,7 +280,7 @@ export default function DashboardPage() {
                   value={sort}
                   onChange={e => setSort(e.target.value as typeof sort)}
                   style={{
-                    padding: '9px 36px 9px 34px',
+                    padding: '9px 32px 9px 12px',
                     background: 'var(--bg-secondary)',
                     border: '1px solid var(--border)',
                     borderRadius: 8,
@@ -294,14 +296,9 @@ export default function DashboardPage() {
                   onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; }}
                 >
                   {sortOptions.map(o => (
-                    <option key={o.value} value={o.value}>{o.icon} {o.label}</option>
+                    <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
-                {/* Sort icon left */}
-                <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, pointerEvents: 'none', color: 'var(--text-muted)' }}>
-                  {sortOptions.find(o => o.value === sort)?.icon}
-                </span>
-                {/* Chevron right */}
                 <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 10, pointerEvents: 'none', color: 'var(--text-muted)' }}>▼</span>
               </div>
 
