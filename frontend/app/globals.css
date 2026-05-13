@@ -753,7 +753,7 @@ body::before {
   pointer-events: none;
   z-index: 9999;
   background: radial-gradient(
-    600px circle at var(--mx, 50%) var(--my, 50%),
+    200px circle at var(--mx, 50%) var(--my, 50%),
     rgba(139, 92, 246, 0.1),
     transparent 60%
   );

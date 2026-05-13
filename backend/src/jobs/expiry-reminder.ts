@@ -2,7 +2,7 @@ import { Resend } from 'resend';
 import { supabase } from '../lib/supabase';
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.fasthdr.cz';
+const GOPAY_RETURN_URL = process.env.GOPAY_RETURN_URL || 'https://www.fasthdr.cz';
 
 export async function sendExpiryReminders() {
     const in2days = new Date();
@@ -44,7 +44,7 @@ export async function sendExpiryReminders() {
                                 bude dostupná ještě přibližně <strong style="color:#f59e0b;">24 hodin</strong>.
                                 Stáhněte ji co nejdříve.
                             </p>
-                            <a href="${FRONTEND_URL}/dashboard"
+                            <a href="${GOPAY_RETURN_URL}/dashboard"
                                style="display:inline-block;background:#f59e0b;color:#000;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;text-decoration:none;margin-bottom:32px;">
                                 Stáhnout fotografii →
                             </a>

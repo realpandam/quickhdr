@@ -6,8 +6,6 @@ import { createPayment, getPaymentStatus } from '../services/gopay.service';
 const router = Router();
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-
 const GOPAY_RETURN_URL = process.env.GOPAY_RETURN_URL || 'https://fasthdr.cz';
 
 const PRICE_CZK = parseInt(process.env.PRICE_CZK || '25');
@@ -41,7 +39,7 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
                 .eq('image_id', image_id)
                 .eq('payment_status', 'pending');
 
-            const mockUrl = `${FRONTEND_URL}/success?image_id=${image_id}&gopay_id=${mockPaymentId}&mock=true`;
+            const mockUrl = `${GOPAY_RETURN_URL}/success?image_id=${image_id}&gopay_id=${mockPaymentId}&mock=true`;
             res.json({ url: mockUrl });
 
         } else {
@@ -120,7 +118,6 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
 
         const payment = await getPaymentStatus(paymentId);
 
-        console.log('GoPay state:', payment.state);
         const isPaid = ['PAID', 'AUTHORIZED', 'PAYMENT_METHOD_CHOSEN'].includes(payment.state);
 
         if (!isPaid) {
@@ -132,11 +129,16 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
             .update({ payment_status: 'paid' })
             .eq('gopay_payment_id', paymentId);
 
-        const customerEmail = order?.email || payment.payer?.contact?.email;
+        let customerEmail = order?.email || payment.payer?.contact?.email;
+
+        if (!customerEmail && order?.user_id) {
+            const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
+            customerEmail = userData?.user?.email;
+        }
+
         if (customerEmail) {
             await sendConfirmationEmail(customerEmail, order?.filename ?? '', order?.image_id ?? '');
         }
-
         res.json({ image_id: order?.image_id, paid: true });
 
     } catch (error) {
@@ -188,6 +190,10 @@ router.post('/notify', async (req: Request, res: Response) => {
 // Helper — email notifikace po platbě
 // ─────────────────────────────────────────────
 async function sendConfirmationEmail(email: string, filename: string, imageId: string) {
+    const safeName = filename ?? 'bez názvu';
+    const safeRef = filename ?? imageId;
+    const year = new Date().getFullYear();
+
     try {
         await resend.emails.send({
             from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
@@ -195,55 +201,131 @@ async function sendConfirmationEmail(email: string, filename: string, imageId: s
             subject: 'Vaše fotografie je připravena ke stažení',
             html: `
                 <!DOCTYPE html>
-                <html>
-                <head>
+                    <html lang="cs">
+                    <head>
                     <meta charset="utf-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1">
-                </head>
-                <body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-                    <div style="max-width:560px;margin:0 auto;padding:48px 24px;">
+                    <meta name="color-scheme" content="dark">
+                    <meta name="supported-color-schemes" content="dark">
+                    <title>Vaše fotografie je připravena — FastHDR</title>
+                    </head>
+                    <body style="margin:0;padding:0;background:#09090F;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;color:#ffffff;-webkit-font-smoothing:antialiased;">
 
-                        <p style="font-size:14px;font-weight:600;color:#ffffff;margin:0 0 40px;">
-                            FASTHDR
-                        </p>
-
-                        <div style="width:48px;height:48px;border-radius:50%;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);display:flex;align-items:center;justify-content:center;margin-bottom:24px;">
-                            <span style="font-size:20px;">✓</span>
-                        </div>
-
-                        <h1 style="font-size:24px;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
-                            Vaše fotografie je připravena
-                        </h1>
-                        <p style="font-size:15px;color:#888;margin:0 0 32px;line-height:1.6;">
-                            Platba proběhla úspěšně a vaše fotografie
-                            <strong style="color:#ccc;">${filename || 'bez názvu'}</strong>
-                            je připravena ke stažení v plném rozlišení.
-                        </p>
-
-                        <a href="${FRONTEND_URL}/dashboard"
-                           style="display:inline-block;background:#f59e0b;color:#000;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;text-decoration:none;margin-bottom:32px;">
-                            Přejít do Moje fotografie →
-                        </a>
-
-                        <div style="border:1px solid #222;border-radius:8px;padding:20px;margin-bottom:32px;">
-                            <p style="font-size:13px;color:#666;margin:0 0 8px;">
-                                <strong style="color:#888;">Soubor:</strong> ${filename || imageId}
-                            </p>
-                            <p style="font-size:13px;color:#666;margin:0 0 8px;">
-                                <strong style="color:#888;">Dostupné po dobu:</strong> 7 dní
-                            </p>
-                            <p style="font-size:13px;color:#666;margin:0;">
-                                <strong style="color:#888;">Podpora:</strong> info@fasthdr.cz
-                            </p>
-                        </div>
-
-                        <p style="font-size:12px;color:#444;margin:0;line-height:1.6;">
-                            © ${new Date().getFullYear()} FASTHDR. Všechna práva vyhrazena.<br>
-                            IČO: 23584203 · Drnovec 1, 471 54 Cvikov
-                        </p>
-
+                    <!-- Hidden preheader -->
+                    <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#09090F;">
+                        Platba proběhla úspěšně. Vaše fotografie ${safeName} je připravena ke stažení.
                     </div>
-                </body>
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090F;padding:32px 16px;">
+                        <tr>
+                        <td align="center">
+                            <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
+
+                            <!-- Logo header -->
+                            <tr>
+                                <td align="center" style="padding:0 0 32px;">
+                                <img src="${GOPAY_RETURN_URL}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;outline:none;text-decoration:none;">
+                                </td>
+                            </tr>
+
+                            <!-- Hero card -->
+                            <tr>
+                                <td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;">
+
+                                <!-- Status badge -->
+                                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
+                                    <tr>
+                                    <td style="background:#0D2E1F;border:1px solid #1E5340;border-radius:24px;padding:8px 16px;">
+                                        <span style="font-size:12px;font-weight:600;color:#4ADE80;letter-spacing:0.5px;text-transform:uppercase;">
+                                        ● Platba úspěšná
+                                        </span>
+                                    </td>
+                                    </tr>
+                                </table>
+
+                                <!-- Heading -->
+                                <h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
+                                    Vaše fotografie<br>je připravena ke stažení
+                                </h1>
+
+                                <!-- Description -->
+                                <p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">
+                                    Platba za soubor <strong style="color:#ffffff;font-weight:600;">${safeName}</strong> proběhla úspěšně. Profesionálně upravená fotografie je nyní dostupná ke stažení v plném rozlišení.
+                                </p>
+
+                                <!-- CTA Button -->
+                                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
+                                    <tr>
+                                    <td style="background:#7B5CF0;border-radius:10px;">
+                                        <a href="${GOPAY_RETURN_URL}/dashboard"
+                                        style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">
+                                        Stáhnout fotografii →
+                                        </a>
+                                    </td>
+                                    </tr>
+                                </table>
+
+                                <!-- Divider -->
+                                <div style="height:1px;background:#22222E;margin:0 0 24px;"></div>
+
+                                <!-- Detail rows -->
+                                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                                    <tr>
+                                    <td style="padding:8px 0;font-size:13px;color:#8888A0;width:140px;">Soubor</td>
+                                    <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;word-break:break-all;">${safeRef}</td>
+                                    </tr>
+                                    <tr>
+                                    <td style="padding:8px 0;font-size:13px;color:#8888A0;">Stav</td>
+                                    <td style="padding:8px 0;font-size:13px;color:#4ADE80;font-weight:500;">Zaplaceno</td>
+                                    </tr>
+                                    <tr>
+                                    <td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupné po dobu</td>
+                                    <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní</td>
+                                    </tr>
+                                    <tr>
+                                    <td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td>
+                                    <td style="padding:8px 0;font-size:13px;">
+                                        <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a>
+                                    </td>
+                                    </tr>
+                                </table>
+
+                                </td>
+                            </tr>
+
+                            <!-- Tip -->
+                            <tr>
+                                <td style="padding:24px 32px 0;">
+                                <p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">
+                                    💡 Tip: Fotografii si stáhněte včas — po 7 dnech bude automaticky odstraněna z našich serverů.
+                                </p>
+                                </td>
+                            </tr>
+
+                            <!-- Footer -->
+                            <tr>
+                                <td style="padding:40px 32px 16px;">
+                                <div style="border-top:1px solid #16161F;padding-top:24px;">
+                                    <p style="font-size:11px;line-height:1.7;color:#555568;margin:0;text-align:center;">
+                                    <strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>
+                                    Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br>
+                                    <a href="${GOPAY_RETURN_URL}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a>
+                                    ·
+                                    <a href="${GOPAY_RETURN_URL}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a>
+                                    ·
+                                    <a href="${GOPAY_RETURN_URL}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a>
+                                    </p>
+                                    <p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">
+                                    © ${year} FASTHDR. Všechna práva vyhrazena.
+                                    </p>
+                                </div>
+                                </td>
+                            </tr>
+                            </table>
+                        </td>
+                        </tr>
+                    </table>
+                    </body>
                 </html>
             `,
         });

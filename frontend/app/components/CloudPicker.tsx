@@ -236,7 +236,7 @@ export default function CloudPicker({ onFiles }: Props) {
             />
 
             {/* Tlačítka */}
-            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', marginBottom: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>
                     nebo importovat z
                 </p>

@@ -16,7 +16,8 @@ const upload = multer({
 
 const API_KEY = process.env.AUTOENHANCE_API_KEY!;
 const API_BASE = 'https://api.autoenhance.ai';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.fasthdr.cz';
+
+const GOPAY_RETURN_URL = process.env.GOPAY_RETURN_URL || 'https://fasthdr.cz';
 
 const PRICE_CZK = parseInt(process.env.PRICE_CZK || '25');
 
@@ -131,13 +132,6 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
         payment_session_id: `pending_${image_id}`,
       })
       .select();
-
-    console.log('INSERT RESULT:', JSON.stringify({
-      image_id,
-      user_id,
-      error: insertError?.message,
-      data: insertData
-    }));
 
     res.json({ image_id });
   } catch (error) {
@@ -271,13 +265,6 @@ router.post('/hdr/order', async (req: Request, res: Response) => {
       hdr_order_id: order_id, // nový sloupec pro HDR
       payment_session_id: `pending_hdr_${order_id}`,
     });
-
-    console.log('HDR INSERT RESULT:', JSON.stringify({
-      image_id: `hdr_pending_${order_id}`,
-      user_id,
-      error: insertError?.message,
-      data: insertData
-    }));
 
     res.json({ order_id });
   } catch (error) {
@@ -449,7 +436,6 @@ router.get('/cron/expiry-reminders', async (req: Request, res: Response) => {
 // ── Autoenhance Webhook ───────────────────────────────────────────────────────
 // Autoenhance volá tento endpoint po dokončení zpracování každé fotky
 router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
-  console.log('WEBHOOK:', JSON.stringify({ event: req.body.event, image_id: req.body.image_id, order_id: req.body.order_id }));
   // Odpověz okamžitě — Autoenhance čeká max 5s
   res.status(200).json({ ok: true });
 
@@ -501,7 +487,7 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
             from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
             to: userData.user.email,
             subject: 'Vaše fotografie je zpracována ✓',
-            html: notifyEmailHtml(order.filename, image_id, FRONTEND_URL),
+            html: notifyEmailHtml(order.filename, image_id, GOPAY_RETURN_URL),
           });
         }
       } catch (emailErr) {
@@ -558,7 +544,7 @@ router.post('/notify', async (req: Request, res: Response) => {
       from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
       to: userData.user.email,
       subject: 'Vaše fotografie je zpracována a připravena ke koupi',
-      html: notifyEmailHtml(filename, image_id, FRONTEND_URL),
+      html: notifyEmailHtml(filename, image_id, GOPAY_RETURN_URL),
     });
 
     res.json({ ok: true });
