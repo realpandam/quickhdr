@@ -276,11 +276,17 @@ export default function DashboardPage() {
 
               {/* Sort dropdown styled */}
               <div style={{ position: 'relative' }}>
+                <span style={{
+                  position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+                  fontSize: 13, pointerEvents: 'none', color: 'var(--text-muted)',
+                }}>
+                  {sort === 'newest' ? '↓' : sort === 'oldest' ? '↑' : sort === 'az' ? 'A' : 'Z'}
+                </span>
                 <select
                   value={sort}
                   onChange={e => setSort(e.target.value as typeof sort)}
                   style={{
-                    padding: '9px 32px 9px 12px',
+                    padding: '9px 32px 9px 28px',
                     background: 'var(--bg-secondary)',
                     border: '1px solid var(--border)',
                     borderRadius: 8,
