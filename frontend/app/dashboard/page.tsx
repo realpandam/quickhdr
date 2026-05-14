@@ -15,6 +15,7 @@ interface Order {
   created_at: string;
   expires_at: string;
   upload_batch_id: string | null;
+  batch_name: string | null;
 }
 
 interface BatchGroup {
@@ -51,7 +52,9 @@ function groupOrders(orders: Order[]): BatchGroup[] {
     const sorted = [...orders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     const firstName = sorted[0]?.filename ?? '';
     const baseName = firstName.replace(/\.[^.]+$/, '');
-    const name = orders.length > 1 ? `${baseName} + ${orders.length - 1} dalších` : firstName || 'Bez názvu';
+    // Prefer custom batch_name if set
+    const customName = sorted[0]?.batch_name;
+    const name = customName || (orders.length > 1 ? `${baseName} + ${orders.length - 1} dalších` : firstName || 'Bez názvu');
     const isExpired = sorted.every(o => new Date(o.expires_at) < new Date());
     const paidCount = orders.filter(o => o.payment_status === 'paid').length;
     return { batch_id, orders: sorted, name, created_at: sorted[0]?.created_at ?? '', isExpired, paidCount, totalCount: orders.length };
@@ -71,6 +74,10 @@ export default function DashboardPage() {
   const [openBatches, setOpenBatches] = useState<Set<string>>(new Set());
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  // Rename state: batchId -> current editing value
+  const [editingBatch, setEditingBatch] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const [placeholderText, setPlaceholderText] = useState('');
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
@@ -118,6 +125,14 @@ export default function DashboardPage() {
     init();
   }, []);
 
+  // Focus input when editing starts
+  useEffect(() => {
+    if (editingBatch && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [editingBatch]);
+
   // Lightbox keyboard navigation
   useEffect(() => {
     if (!lightbox) return;
@@ -153,7 +168,7 @@ export default function DashboardPage() {
 
   const toggleSelectAll = (group: BatchGroup, e: React.MouseEvent) => {
     e.stopPropagation();
-    const groupIds = group.orders.filter(o => !new Date(o.expires_at) || new Date(o.expires_at) > new Date()).map(o => o.id);
+    const groupIds = group.orders.filter(o => new Date(o.expires_at) > new Date()).map(o => o.id);
     const allSelected = groupIds.every(id => selectedOrders.has(id));
     setSelectedOrders(prev => {
       const next = new Set(prev);
@@ -161,6 +176,35 @@ export default function DashboardPage() {
       else groupIds.forEach(id => next.add(id));
       return next;
     });
+  };
+
+  const startRename = (group: BatchGroup, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingBatch(group.batch_id);
+    setEditingValue(group.name);
+  };
+
+  const saveRename = async (group: BatchGroup) => {
+    const newName = editingValue.trim();
+    setEditingBatch(null);
+    if (!newName || newName === group.name) return;
+
+    // Update all orders in this batch
+    const imageIds = group.orders.map(o => o.id);
+    await supabase.from('orders')
+      .update({ batch_name: newName })
+      .in('id', imageIds)
+      .eq('user_id', user!.id);
+
+    // Update local state
+    setOrders(prev => prev.map(o =>
+      imageIds.includes(o.id) ? { ...o, batch_name: newName } : o
+    ));
+  };
+
+  const cancelRename = () => {
+    setEditingBatch(null);
+    setEditingValue('');
   };
 
   const getSelectedOrderObjects = () => orders.filter(o => selectedOrders.has(o.id));
@@ -174,14 +218,12 @@ export default function DashboardPage() {
     if (!consent?.agreed_to_terms_at) { window.location.href = '/?consent=required'; return; }
     setCheckoutLoading(true);
     try {
-      const totalAmount = selectedPending.length * (selectedPending[0]?.amount_czk ?? 25);
       const res = await fetch(`${API_URL}/api/payments/create-checkout`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image_ids: selectedPending.map(o => o.image_id),
           image_id: selectedPending[0].image_id,
           filename: `${selectedPending.length} fotografií`,
-          amount: totalAmount,
           user_id: user.id,
           email: user.email ?? null,
         }),
@@ -373,7 +415,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* ── Multiselect action bar ── */}
+        {/* Multiselect action bar */}
         <div style={{
           overflow: 'hidden',
           maxHeight: hasSelection ? 80 : 0,
@@ -388,7 +430,7 @@ export default function DashboardPage() {
           }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>
               {selectedOrders.size} {selectedOrders.size === 1 ? 'fotografie' : selectedOrders.size < 5 ? 'fotografie' : 'fotografií'} vybrány
-              {selectedPending.length > 0 && ` · ${selectedPending.length * (selectedPending[0]?.amount_czk ?? 25)} Kč`}
+              {selectedPending.length > 0 && ` · ${selectedPending.reduce((s, o) => s + (o.amount_czk ?? 25), 0)} Kč`}
             </span>
             {selectedPaid.length > 0 && (
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -400,7 +442,6 @@ export default function DashboardPage() {
                 padding: '8px 20px', background: 'var(--accent)', color: '#000',
                 border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13,
                 fontWeight: 700, fontFamily: 'inherit', opacity: checkoutLoading ? 0.6 : 1,
-                transition: 'all 0.2s ease',
               }}>
                 {checkoutLoading ? 'Načítám…' : `Koupit ${selectedPending.length > 1 ? `${selectedPending.length} fotek` : 'fotku'}`}
               </button>
@@ -445,31 +486,31 @@ export default function DashboardPage() {
                 const activeOrders = group.orders.filter(o => new Date(o.expires_at) > new Date());
                 const allGroupSelected = activeOrders.length > 0 && activeOrders.every(o => selectedOrders.has(o.id));
                 const someGroupSelected = activeOrders.some(o => selectedOrders.has(o.id));
+                const isEditing = editingBatch === group.batch_id;
 
                 return (
                   <div key={group.batch_id} className="batch-card" style={{
                     borderRadius: 12,
                     border: batchExpired ? '1px solid rgba(239,68,68,0.25)' : '1px solid var(--border)',
-                    background: 'var(--bg-card)',
-                    overflow: 'hidden',
+                    background: 'var(--bg-card)', overflow: 'hidden',
                     animation: `slideUp 0.4s cubic-bezier(0.34,1.56,0.64,1) ${gIdx * 0.05}s both`,
                     transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
                   }}>
 
                     {/* Batch header */}
                     <div
-                      onClick={() => toggleBatch(group.batch_id)}
+                      onClick={() => !isEditing && toggleBatch(group.batch_id)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 12,
-                        padding: '13px 16px', cursor: 'pointer',
+                        padding: '13px 16px', cursor: isEditing ? 'default' : 'pointer',
                         borderBottom: isOpen ? '1px solid var(--border)' : 'none',
                         background: batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)',
                         transition: 'background 0.2s',
                         opacity: batchExpired ? 0.75 : 1,
                         userSelect: 'none' as const,
                       }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.06)' : 'var(--bg-secondary)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)'; }}
+                      onMouseEnter={e => { if (!isEditing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.06)' : 'var(--bg-secondary)'; }}
+                      onMouseLeave={e => { if (!isEditing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)'; }}
                     >
                       {/* Select all checkbox */}
                       {!batchExpired && activeOrders.length > 0 && (
@@ -497,11 +538,60 @@ export default function DashboardPage() {
                         {batchExpired ? '⏰' : isSingle ? '🖼️' : '📁'}
                       </div>
 
-                      {/* Meta */}
+                      {/* Name — inline editable */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {group.name}
-                        </p>
+                        {isEditing ? (
+                          <input
+                            ref={renameInputRef}
+                            value={editingValue}
+                            onChange={e => setEditingValue(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') saveRename(group);
+                              if (e.key === 'Escape') cancelRename();
+                            }}
+                            onBlur={() => saveRename(group)}
+                            onClick={e => e.stopPropagation()}
+                            style={{
+                              width: '100%', fontSize: 14, fontWeight: 600,
+                              color: 'var(--text-primary)', background: 'var(--bg-secondary)',
+                              border: '1.5px solid var(--accent)', borderRadius: 6,
+                              padding: '4px 8px', outline: 'none', fontFamily: 'inherit',
+                              boxShadow: '0 0 0 3px rgba(123,92,240,0.15)',
+                              transition: 'all 0.15s ease',
+                            }}
+                            placeholder="Název skupiny…"
+                            maxLength={80}
+                          />
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                            <p
+                              onClick={e => !batchExpired && startRename(group, e)}
+                              title={batchExpired ? undefined : 'Klikněte pro přejmenování'}
+                              style={{
+                                fontSize: 14, fontWeight: 600, color: 'var(--text-primary)',
+                                margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                cursor: batchExpired ? 'default' : 'text',
+                                padding: '4px 6px', borderRadius: 5, marginLeft: -6,
+                                transition: 'background 0.15s ease',
+                              }}
+                              onMouseEnter={e => { if (!batchExpired) (e.currentTarget as HTMLParagraphElement).style.background = 'var(--bg-secondary)'; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLParagraphElement).style.background = 'transparent'; }}
+                            >
+                              {group.name}
+                            </p>
+                            {!batchExpired && (
+                              <span
+                                onClick={e => startRename(group, e)}
+                                title="Přejmenovat"
+                                style={{ fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', opacity: 0.5, flexShrink: 0, transition: 'opacity 0.15s' }}
+                                onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.opacity = '1'; }}
+                                onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.opacity = '0.5'; }}
+                              >
+                                ✎
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
                           {new Date(group.created_at).toLocaleDateString('cs-CZ')}
                           {countdown && !batchExpired && ` · Vyprší za ${countdown}`}
@@ -526,7 +616,6 @@ export default function DashboardPage() {
                             {group.totalCount} fotek
                           </span>
                         )}
-                        {/* Delete batch button — always visible */}
                         <button
                           onClick={e => { e.stopPropagation(); handleDeleteBatch(group.orders); }}
                           title="Smazat skupinu"
@@ -546,14 +635,13 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    {/* Expanded content — animated */}
+                    {/* Expanded content */}
                     <div style={{
                       display: 'grid',
                       gridTemplateRows: isOpen ? '1fr' : '0fr',
                       transition: 'grid-template-rows 0.35s cubic-bezier(0.4,0,0.2,1)',
                     }}>
                       <div style={{ overflow: 'hidden' }}>
-                        {/* Photo grid */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1px', background: 'var(--border)' }}>
                           {group.orders.map((order, oIdx) => {
                             const expired = new Date(order.expires_at) < new Date();
@@ -564,12 +652,10 @@ export default function DashboardPage() {
                             return (
                               <div key={order.id} style={{
                                 background: isSelected ? 'rgba(123,92,240,0.06)' : 'var(--bg-card)',
-                                padding: '10px',
-                                transition: 'background 0.15s ease',
+                                padding: '10px', transition: 'background 0.15s ease',
                                 animation: isOpen ? `fadeInPhoto 0.3s ease ${oIdx * 0.03}s both` : 'none',
                                 position: 'relative' as const,
                               }}>
-                                {/* Per-photo checkbox */}
                                 {!expired && (
                                   <div
                                     onClick={e => toggleOrder(order.id, e)}
@@ -587,7 +673,6 @@ export default function DashboardPage() {
                                   </div>
                                 )}
 
-                                {/* Thumbnail */}
                                 <div
                                   onClick={() => openLightbox(group.orders, oIdx)}
                                   style={{
@@ -595,8 +680,7 @@ export default function DashboardPage() {
                                     background: 'var(--bg-secondary)', cursor: 'zoom-in',
                                     overflow: 'hidden', borderRadius: 7, marginBottom: 8,
                                     outline: isSelected ? '2px solid #7B5CF0' : 'none',
-                                    outlineOffset: '-2px',
-                                    transition: 'outline 0.15s ease',
+                                    outlineOffset: '-2px', transition: 'outline 0.15s ease',
                                   }}
                                 >
                                   <img
@@ -608,13 +692,10 @@ export default function DashboardPage() {
                                     onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                   />
                                   {isPaid && !expired && (
-                                    <div style={{ position: 'absolute' as const, top: 5, right: 5, background: 'rgba(74,222,128,0.9)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, color: '#052e16' }}>
-                                      ✓
-                                    </div>
+                                    <div style={{ position: 'absolute' as const, top: 5, right: 5, background: 'rgba(74,222,128,0.9)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, color: '#052e16' }}>✓</div>
                                   )}
                                 </div>
 
-                                {/* Filename */}
                                 <p style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', margin: '0 0 3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {order.filename && !order.filename.match(/^[0-9a-f-]{36}/) ? order.filename : 'Bez názvu'}
                                 </p>
@@ -625,7 +706,6 @@ export default function DashboardPage() {
                                   </p>
                                 )}
 
-                                {/* Actions */}
                                 <div style={{ display: 'flex', gap: 5 }}>
                                   {isPaid && !expired ? (
                                     <a href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
@@ -649,7 +729,6 @@ export default function DashboardPage() {
                           })}
                         </div>
 
-                        {/* Batch footer */}
                         <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                             {group.paidCount} z {group.totalCount} zaplaceno · {group.orders.reduce((s, o) => s + (o.amount_czk || 0), 0)} Kč celkem
@@ -667,7 +746,6 @@ export default function DashboardPage() {
               })}
             </div>
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '2rem 0', flexWrap: 'wrap' }}>
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
@@ -694,31 +772,25 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* ── Lightbox s navigací ── */}
+      {/* Lightbox */}
       {lightbox && currentLightboxOrder && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.96)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(10px)', animation: 'fadeIn 0.2s ease' }}
           onClick={() => setLightbox(null)}
         >
-          {/* Prev button */}
           {lightbox.index > 0 && (
-            <button
-              onClick={e => { e.stopPropagation(); setLightbox(prev => prev ? { ...prev, index: prev.index - 1 } : prev); }}
-              style={{ position: 'fixed', left: 20, top: '50%', transform: 'translateY(-50%)', width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', transition: 'background 0.2s', backdropFilter: 'blur(8px)' }}
+            <button onClick={e => { e.stopPropagation(); setLightbox(prev => prev ? { ...prev, index: prev.index - 1 } : prev); }}
+              style={{ position: 'fixed', left: 20, top: '50%', transform: 'translateY(-50%)', width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.2)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)'; }}
             >←</button>
           )}
-
-          {/* Image */}
           <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, maxWidth: '90vw' }}>
-            <img
-              key={currentLightboxOrder.image_id}
+            <img key={currentLightboxOrder.image_id}
               src={`${API_URL}/api/enhance/enhanced/${currentLightboxOrder.image_id}?preview=true&quality=90`}
               alt={currentLightboxOrder.filename}
               style={{ maxWidth: '85vw', maxHeight: '82vh', objectFit: 'contain', borderRadius: 10, boxShadow: '0 25px 60px rgba(0,0,0,0.5)', animation: 'zoomIn 0.25s cubic-bezier(0.34,1.56,0.64,1)' }}
             />
-            {/* Caption */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>
                 {lightbox.index + 1} / {lightbox.orders.length} · {currentLightboxOrder.filename && !currentLightboxOrder.filename.match(/^[0-9a-f-]{36}/) ? currentLightboxOrder.filename : 'Bez názvu'}
@@ -732,31 +804,25 @@ export default function DashboardPage() {
                 </a>
               )}
             </div>
-            {/* Dot indicators */}
             {lightbox.orders.length > 1 && (
               <div style={{ display: 'flex', gap: 6 }}>
                 {lightbox.orders.map((_, i) => (
-                  <div key={i}
-                    onClick={e => { e.stopPropagation(); setLightbox(prev => prev ? { ...prev, index: i } : prev); }}
+                  <div key={i} onClick={e => { e.stopPropagation(); setLightbox(prev => prev ? { ...prev, index: i } : prev); }}
                     style={{ width: i === lightbox.index ? 20 : 6, height: 6, borderRadius: 3, background: i === lightbox.index ? 'var(--accent)' : 'rgba(255,255,255,0.3)', cursor: 'pointer', transition: 'all 0.2s ease' }}
                   />
                 ))}
               </div>
             )}
           </div>
-
-          {/* Next button */}
           {lightbox.index < lightbox.orders.length - 1 && (
-            <button
-              onClick={e => { e.stopPropagation(); setLightbox(prev => prev ? { ...prev, index: prev.index + 1 } : prev); }}
-              style={{ position: 'fixed', right: 20, top: '50%', transform: 'translateY(-50%)', width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', transition: 'background 0.2s', backdropFilter: 'blur(8px)' }}
+            <button onClick={e => { e.stopPropagation(); setLightbox(prev => prev ? { ...prev, index: prev.index + 1 } : prev); }}
+              style={{ position: 'fixed', right: 20, top: '50%', transform: 'translateY(-50%)', width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.2)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)'; }}
             >→</button>
           )}
-
-          {/* Close */}
-          <button onClick={() => setLightbox(null)} style={{ position: 'fixed', top: 24, right: 28, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
+          <button onClick={() => setLightbox(null)}
+            style={{ position: 'fixed', top: 24, right: 28, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
             onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.22)'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.12)'; }}
           >✕</button>
