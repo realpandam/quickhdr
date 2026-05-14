@@ -19,6 +19,7 @@ interface PhotoItem {
   progress: number;
   error: string | null;
   hdr_group_id?: string;
+  upload_batch_id?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -111,6 +112,7 @@ export default function ImageUploader() {
       formData.append('settings', JSON.stringify(currentSettings));
       formData.append('session_id', sessionId);
       if (user) formData.append('user_id', user.id);
+      if (item.upload_batch_id) formData.append('upload_batch_id', item.upload_batch_id);
 
       const uploadRes = await fetch(`${API_URL}/api/enhance/upload`, {
         method: 'POST',
@@ -303,6 +305,8 @@ export default function ImageUploader() {
     const captured = { ...settings };
     const groupId = crypto.randomUUID();
 
+    const batchId = captured.hdr_mode ? undefined : crypto.randomUUID(); // jedno UUID pro celou dávku
+
     const newItems: PhotoItem[] = validFiles.map(file => ({
       id: crypto.randomUUID(),
       file,
@@ -312,6 +316,7 @@ export default function ImageUploader() {
       progress: 0,
       error: null,
       hdr_group_id: captured.hdr_mode ? groupId : undefined,
+      upload_batch_id: batchId,
     }));
     setPhotos(prev => [...prev, ...newItems]);
 
