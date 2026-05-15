@@ -249,10 +249,11 @@ export default function LoginPage() {
     setLoading(true);
     const params = new URLSearchParams(window.location.search);
     const returnTo = params.get('returnTo') ?? '/dashboard';
+
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?returnTo=${returnTo}`,
+        redirectTo: `https://www.fasthdr.cz/auth/callback?returnTo=${returnTo}`,
       },
     });
   };
