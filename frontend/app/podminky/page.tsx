@@ -66,7 +66,7 @@ export default function PodminkyPage() {
           },
           {
             title: '10. Kontakt',
-            content: `Filip Zemek\nDrnovec 1, 471 54 Cvikov\nIČO: 23584203\nE-mail: info@fasthdr.cz`,
+            content: `Filip Zemek\nDrnovec 1, 471 54 Cvikov\nIČO: 23584203\nE-mail: info@fasthdr.cz\nTel.: +420 777 080 877`,
           },
         ].map(section => (
           <div key={section.title} style={{ marginBottom: '2rem' }}>

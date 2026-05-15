@@ -22,7 +22,8 @@ export default function Footer() {
             Drnovec 1, 471 54 Cvikov<br />
             <a href="mailto:info@fasthdr.cz" style={{ color: 'var(--text-muted)' }}>
               info@fasthdr.cz
-            </a>
+            </a><br />
+            +420 777 080 877
           </p>
         </div>
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
