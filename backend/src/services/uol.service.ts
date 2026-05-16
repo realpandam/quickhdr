@@ -186,7 +186,7 @@ export class UolService {
 
   async createInvoice(input: UolInvoiceInput): Promise<UolInvoiceResult> {
     const today      = input.issue_date;
-    const externalId = `${this.externalIdPrefix}${input.order_id}`;
+    const orderIdClean = input.order_id.replace(/-/g, ''); const externalId = `${this.externalIdPrefix}${orderIdClean}`;
 
     const invoiceItem: Record<string, unknown> = {
       product_id:  this.productId,
@@ -233,7 +233,7 @@ export class UolService {
 
   /** Idempotence check — hledá fakturu podle external_id v UOL */
   async findInvoiceByExternalId(orderId: string): Promise<string | null> {
-    const externalId = `${this.externalIdPrefix}${orderId}`;
+    const orderIdClean = orderId.replace(/-/g, ''); const externalId = `${this.externalIdPrefix}${orderIdClean}`;
     try {
       const res = await withRetry(
         () => this.http.get('/v1/sales_invoices', { params: { external_id: externalId, per_page: 1 } }),
