@@ -2,6 +2,7 @@ import { Request, Response, Router } from 'express';
 import { Resend } from 'resend';
 import { supabase } from '../lib/supabase';
 import { createPayment, getPaymentStatus } from '../services/gopay.service';
+import { createInvoiceForOrder } from '../services/invoice.service';
 
 const router = Router();
 const resend = new Resend(process.env.RESEND_API_KEY!);
@@ -114,6 +115,13 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
                 .update({ payment_status: 'paid' })
                 .eq('gopay_payment_id', paymentId);
 
+            // 🔔 UOL Fakturace — fire & forget pro každý order
+            for (const o of orders) {
+                createInvoiceForOrder(o.id).catch(err =>
+                    console.error('[Payments] Invoice selhala pro order', o.id, err)
+                );
+            }
+
             // Email pošli jednou — shrnutí celé platby
             const primaryOrder = orders[0];
             if (primaryOrder.email) {
@@ -153,6 +161,13 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
         await supabase.from('orders')
             .update({ payment_status: 'paid' })
             .eq('gopay_payment_id', paymentId);
+
+        // 🔔 UOL Fakturace — fire & forget pro každý order
+        for (const o of existingOrders ?? []) {
+            createInvoiceForOrder(o.id).catch(err =>
+                console.error('[Payments] Invoice selhala pro order', o.id, err)
+            );
+        }
 
         const primaryOrder = existingOrders?.[0];
         let customerEmail = primaryOrder?.email || payment.payer?.contact?.email;
@@ -204,6 +219,13 @@ router.post('/notify', async (req: Request, res: Response) => {
                 await supabase.from('orders')
                     .update({ payment_status: 'paid' })
                     .eq('gopay_payment_id', paymentId);
+
+                // 🔔 UOL Fakturace — fire & forget
+                for (const o of orders) {
+                    createInvoiceForOrder(o.id).catch(err =>
+                        console.error('[Payments] Invoice selhala pro order', o.id, err)
+                    );
+                }
 
                 const primaryOrder = orders[0];
                 const customerEmail = primaryOrder.email || payment.payer?.contact?.email;

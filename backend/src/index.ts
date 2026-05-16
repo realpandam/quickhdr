@@ -7,6 +7,8 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import enhanceRouter from './routes/enhance';
 import paymentsRouter from './routes/payments';
+import billingRouter from './routes/billing';
+import cronRouter from './routes/cron';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -48,11 +50,15 @@ app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
+app.use('/api/billing', billingRouter);
+
 app.use('/api/enhance/upload', uploadLimiter);
 app.use('/api/payments/create-checkout', paymentLimiter);
 
 app.use('/api/enhance', enhanceRouter);
 app.use('/api/payments', paymentsRouter);
+
+app.use('/api/cron', cronRouter);
 
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });

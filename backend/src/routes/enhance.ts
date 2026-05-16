@@ -262,18 +262,6 @@ router.post('/consent', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/cron/expiry-reminders', async (req: Request, res: Response) => {
-  const cronSecret = req.headers['x-cron-secret'];
-  if (cronSecret !== process.env.CRON_SECRET) { res.status(401).json({ error: 'Unauthorized' }); return; }
-  try {
-    await sendExpiryReminders();
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('Chyba cron jobu:', err);
-    res.status(500).json({ error: 'Cron job selhal' });
-  }
-});
-
 router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
   res.status(200).json({ ok: true });
   try {
