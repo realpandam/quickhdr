@@ -16,6 +16,8 @@ interface Order {
   expires_at: string;
   upload_batch_id: string | null;
   batch_name: string | null;
+  uol_invoice_id: string | null;
+  uol_invoice_pdf_url: string | null;
 }
 
 interface BatchGroup {
@@ -708,11 +710,38 @@ export default function DashboardPage() {
 
                                 <div style={{ display: 'flex', gap: 5 }}>
                                   {isPaid && !expired ? (
-                                    <a href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
-                                      download={order.filename && !order.filename.match(/^[0-9a-f-]{36}/) ? `enhanced_${order.filename}` : `foto_${order.image_id.slice(0, 8)}.jpg`}
-                                      style={{ flex: 1, textAlign: 'center' as const, padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, textDecoration: 'none', display: 'block', fontFamily: 'inherit' }}>
-                                      Stáhnout
-                                    </a>
+                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                      <a
+                                        href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
+                                        download={order.filename && !order.filename.match(/^[0-9a-f-]{36}/) ? `enhanced_${order.filename}` : `foto_${order.image_id.slice(0, 8)}.jpg`}
+                                        style={{ textAlign: 'center', padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, textDecoration: 'none', display: 'block', fontFamily: 'inherit' }}
+                                      >
+                                        Stáhnout
+                                      </a>
+                                      {/* 🔔 NOVÉ: Tlačítko faktury */}
+                                      {order.uol_invoice_id && (
+                                        <a
+                                          href={`${API_URL}/api/billing/invoice/${order.image_id}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={async (e) => {
+                                            e.preventDefault();
+                                            try {
+                                              const res = await fetch(`${API_URL}/api/billing/invoice/${order.image_id}`);
+                                              const { url } = await res.json();
+                                              if (url) window.open(url, '_blank');
+                                            } catch {
+                                              console.error('Nepodařilo se načíst fakturu');
+                                            }
+                                          }}
+                                          style={{ textAlign: 'center', padding: '5px 8px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', fontSize: 10, fontWeight: 600, textDecoration: 'none', display: 'block', fontFamily: 'inherit', transition: 'all 0.15s ease' }}
+                                          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
+                                          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-muted)'; }}
+                                        >
+                                          📄 Faktura
+                                        </a>
+                                      )}
+                                    </div>
                                   ) : !expired ? (
                                     <button onClick={() => handleBuy(order)} style={{ flex: 1, padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }}>
                                       Koupit
