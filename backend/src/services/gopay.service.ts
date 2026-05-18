@@ -20,7 +20,7 @@ interface CreatePaymentParams {
 interface GoPayPayment {
   id: number;
   gw_url: string;
-  state: 'CREATED' | 'PAID' | 'AUTHORIZED' | 'CANCELED' | 'TIMEOUTED' | 'REFUNDED';
+  state: 'CREATED' | 'PAID' | 'AUTHORIZED' | 'PAYMENT_METHOD_CHOSEN' | 'CANCELED' | 'TIMEOUTED' | 'REFUNDED';
   amount: number;
   currency: string;
   order_number: string;
@@ -56,7 +56,7 @@ async function getAccessToken(): Promise<string> {
 
   cachedToken = {
     token: response.data.access_token,
-    expires: Date.now() + 25 * 60 * 1000, // 25 minut
+    expires: Date.now() + 25 * 60 * 1000,
   };
 
   return cachedToken.token;
@@ -70,7 +70,13 @@ export async function createPayment(params: CreatePaymentParams): Promise<GoPayP
       `${GOPAY_API_URL}/payments/payment`,
       {
         payer: {
-          allowed_payment_instruments: ['PAYMENT_CARD'],
+          // Nabídne všechny metody které má obchodník povolené v GoPay administraci.
+          // Pokud GoPay účet nemá Apple Pay / Google Pay aktivované, automaticky je vynechá.
+          allowed_payment_instruments: [
+            'PAYMENT_CARD',   // Visa, Mastercard, Maestro — vždy dostupné
+            'APPLE_PAY',      // Vyžaduje aktivaci v GoPay administraci
+            'GOOGLE_PAY',     // Vyžaduje aktivaci v GoPay administraci
+          ],
           contact: {
             email: params.email || '',
             first_name: params.firstName || '',
