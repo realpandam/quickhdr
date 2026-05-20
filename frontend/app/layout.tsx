@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import SessionTimeout from './components/SessionTImeout';
 import SmoothScroll from './components/SmoothScroll';
 import './globals.css';
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           data-app-key={process.env.NEXT_PUBLIC_DROPBOX_APP_KEY}
         />
 
+        {/* Theme init — musí být v head před renderem */}
         <script dangerouslySetInnerHTML={{
           __html: `
             (function() {
@@ -33,6 +35,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         }} />
       </head>
       <body>
+        {/* bfcache fix — beforeInteractive zajistí spuštění i po bfcache restore */}
+        <Script
+          id="bfcache-fix"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.addEventListener('pageshow', function(e) {
+                if (e.persisted) { window.location.reload(); }
+              });
+            `
+          }}
+        />
+
         <SmoothScroll />
         {children}
         <SessionTimeout />

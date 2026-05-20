@@ -54,6 +54,11 @@ export default function OrderPage() {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
 
+  // Souhlas s VOP — povinný pro GoPay
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
+  const [consentError, setConsentError] = useState('');
+
   // Fakturační sekce
   const [wantsInvoice, setWantsInvoice] = useState(false);
   const [billingName, setBillingName] = useState('');
@@ -158,12 +163,20 @@ export default function OrderPage() {
   // ── Platba ────────────────────────────────────────────────────────────────
 
   const handleBuy = async () => {
+    // Validace emailu
     const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     if (!emailValid) {
       setEmailError('Zadejte prosím platný email');
       return;
     }
     setEmailError('');
+
+    // Validace souhlasů
+    if (!agreedToTerms || !agreedToPrivacy) {
+      setConsentError('Pro dokončení objednávky je nutné odsouhlasit oba body níže.');
+      return;
+    }
+    setConsentError('');
 
     // Validace IČO pokud chce fakturu
     if (wantsInvoice && billingIco && !isValidIco(billingIco)) {
@@ -345,7 +358,6 @@ export default function OrderPage() {
                   userSelect: 'none',
                 }}
               >
-                {/* Custom checkbox */}
                 <div style={{
                   width: 18, height: 18, borderRadius: 4, flexShrink: 0,
                   border: `2px solid ${wantsInvoice ? 'var(--accent)' : 'var(--border)'}`,
@@ -356,12 +368,8 @@ export default function OrderPage() {
                   {wantsInvoice && <span style={{ color: '#000', fontSize: 11, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                 </div>
                 <div>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-                    Chci fakturu na firmu
-                  </span>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 6 }}>
-                    (nepovinné)
-                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Chci fakturu na firmu</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 6 }}>(nepovinné)</span>
                 </div>
               </div>
 
@@ -374,12 +382,8 @@ export default function OrderPage() {
                 marginBottom: wantsInvoice ? 16 : 0,
               }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 4 }}>
-
-                  {/* IČO + ARES */}
                   <div>
-                    <label style={labelStyle}>
-                      IČO <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
+                    <label style={labelStyle}>IČO <span style={{ color: '#ef4444' }}>*</span></label>
                     <div style={{ position: 'relative' }}>
                       <input
                         type="text"
@@ -394,90 +398,85 @@ export default function OrderPage() {
                         }}
                         style={{ ...inputStyle(!!icoError), paddingRight: aresLoading ? 40 : 14 }}
                       />
-                      {/* ARES spinner */}
                       {aresLoading && (
                         <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, border: '2px solid var(--border)', borderTop: '2px solid var(--accent)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
                       )}
-                      {/* ARES ok badge */}
                       {aresStatus === 'ok' && !aresLoading && (
-                        <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontWeight: 600, color: '#4ade80', background: 'rgba(74,222,128,0.12)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 4, padding: '2px 7px' }}>
-                          ✓ ARES
-                        </div>
+                        <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontWeight: 600, color: '#4ade80', background: 'rgba(74,222,128,0.12)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 4, padding: '2px 7px' }}>✓ ARES</div>
                       )}
                     </div>
                     {icoError && <p style={{ fontSize: 12, color: '#ef4444', marginTop: 4 }}>{icoError}</p>}
-                    {aresStatus === 'ok' && !aresLoading && (
-                      <p style={{ fontSize: 12, color: '#4ade80', marginTop: 4 }}>Údaje doplněny z ARES</p>
-                    )}
-                    {aresStatus === 'notfound' && !aresLoading && (
-                      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>IČO nenalezeno v ARES — vyplňte údaje ručně</p>
-                    )}
+                    {aresStatus === 'ok' && !aresLoading && <p style={{ fontSize: 12, color: '#4ade80', marginTop: 4 }}>Údaje doplněny z ARES</p>}
+                    {aresStatus === 'notfound' && !aresLoading && <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>IČO nenalezeno v ARES — vyplňte údaje ručně</p>}
                   </div>
-
-                  {/* Název firmy */}
                   <div>
-                    <label style={labelStyle}>
-                      Název firmy / jméno <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Realitní makléř s.r.o."
-                      value={billingName}
-                      onChange={e => setBillingName(e.target.value)}
-                      style={inputStyle()}
-                    />
+                    <label style={labelStyle}>Název firmy / jméno <span style={{ color: '#ef4444' }}>*</span></label>
+                    <input type="text" placeholder="Realitní makléř s.r.o." value={billingName} onChange={e => setBillingName(e.target.value)} style={inputStyle()} />
                   </div>
-
-                  {/* DIČ */}
                   <div>
                     <label style={labelStyle}>DIČ <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(volitelné)</span></label>
-                    <input
-                      type="text"
-                      placeholder="CZ12345678"
-                      value={billingDic}
-                      onChange={e => setBillingDic(e.target.value)}
-                      style={inputStyle()}
-                    />
+                    <input type="text" placeholder="CZ12345678" value={billingDic} onChange={e => setBillingDic(e.target.value)} style={inputStyle()} />
                   </div>
-
-                  {/* Adresa */}
                   <div>
                     <label style={labelStyle}>Ulice a č.p. <span style={{ color: '#ef4444' }}>*</span></label>
-                    <input
-                      type="text"
-                      placeholder="Vinohradská 100"
-                      value={billingStreet}
-                      onChange={e => setBillingStreet(e.target.value)}
-                      style={inputStyle()}
-                    />
+                    <input type="text" placeholder="Vinohradská 100" value={billingStreet} onChange={e => setBillingStreet(e.target.value)} style={inputStyle()} />
                   </div>
-
-                  {/* Město + PSČ vedle sebe */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10 }}>
                     <div>
                       <label style={labelStyle}>Město <span style={{ color: '#ef4444' }}>*</span></label>
-                      <input
-                        type="text"
-                        placeholder="Praha"
-                        value={billingCity}
-                        onChange={e => setBillingCity(e.target.value)}
-                        style={inputStyle()}
-                      />
+                      <input type="text" placeholder="Praha" value={billingCity} onChange={e => setBillingCity(e.target.value)} style={inputStyle()} />
                     </div>
                     <div>
                       <label style={labelStyle}>PSČ <span style={{ color: '#ef4444' }}>*</span></label>
-                      <input
-                        type="text"
-                        placeholder="120 00"
-                        value={billingZip}
-                        maxLength={6}
-                        onChange={e => setBillingZip(e.target.value)}
-                        style={inputStyle()}
-                      />
+                      <input type="text" placeholder="120 00" value={billingZip} maxLength={6} onChange={e => setBillingZip(e.target.value)} style={inputStyle()} />
                     </div>
                   </div>
-
                 </div>
+              </div>
+
+              {/* ── Souhlas s VOP — POVINNÝ pro GoPay ── */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, margin: '4px 0 16px' }}>
+
+                {/* Checkbox 1 — VOP + předčasné plnění */}
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={agreedToTerms}
+                    onChange={e => { setAgreedToTerms(e.target.checked); setConsentError(''); }}
+                    style={{ marginTop: 2, accentColor: 'var(--accent)', flexShrink: 0, width: 16, height: 16 }}
+                  />
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    Souhlasím s{' '}
+                    <a href="/podminky" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+                      Všeobecnými obchodními podmínkami
+                    </a>
+                    {' '}a výslovně žádám o zahájení zpracování před uplynutím lhůty pro odstoupení od smlouvy.
+                    Beru na vědomí, že tímto ztrácím právo na odstoupení od smlouvy.{' '}
+                    <span style={{ color: '#ef4444' }}>*</span>
+                  </span>
+                </label>
+
+                {/* Checkbox 2 — GDPR */}
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={agreedToPrivacy}
+                    onChange={e => { setAgreedToPrivacy(e.target.checked); setConsentError(''); }}
+                    style={{ marginTop: 2, accentColor: 'var(--accent)', flexShrink: 0, width: 16, height: 16 }}
+                  />
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    Souhlasím se{' '}
+                    <a href="/ochrana-soukromi" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+                      Zásadami ochrany osobních údajů
+                    </a>
+                    {' '}a beru na vědomí, že nahrané fotografie budou uloženy po dobu maximálně 7 dnů a poté trvale smazány.{' '}
+                    <span style={{ color: '#ef4444' }}>*</span>
+                  </span>
+                </label>
+
+                {consentError && (
+                  <p style={{ fontSize: 12, color: '#ef4444', margin: 0 }}>{consentError}</p>
+                )}
               </div>
 
               {/* ── CTA tlačítka ── */}
@@ -485,7 +484,12 @@ export default function OrderPage() {
                 <button
                   onClick={handleBuy}
                   className="btn btn-primary"
-                  style={{ flex: 2, padding: '13px', fontSize: 15, fontWeight: 700, borderRadius: 8 }}
+                  disabled={!agreedToTerms || !agreedToPrivacy}
+                  style={{
+                    flex: 2, padding: '13px', fontSize: 15, fontWeight: 700, borderRadius: 8,
+                    opacity: (!agreedToTerms || !agreedToPrivacy) ? 0.5 : 1,
+                    cursor: (!agreedToTerms || !agreedToPrivacy) ? 'not-allowed' : 'pointer',
+                  }}
                 >
                   Koupit & Stáhnout — {PRICE_CZK} Kč
                 </button>
@@ -517,20 +521,14 @@ export default function OrderPage() {
         {/* ── Error ── */}
         {status === 'error' && (
           <>
-            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 1.5rem' }}>
-              ✗
-            </div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-              Zpracování selhalo
-            </h2>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 1.5rem' }}>✗</div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Zpracování selhalo</h2>
             <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: '2rem', lineHeight: 1.6 }}>
               Omlouváme se, došlo k chybě při zpracování fotografie.<br />
               Zkuste to prosím znovu nebo nás kontaktujte na{' '}
               <a href="mailto:info@fasthdr.cz" style={{ color: 'var(--accent)' }}>info@fasthdr.cz</a>.
             </p>
-            <a href="/" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14 }}>
-              Zkusit znovu
-            </a>
+            <a href="/" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14 }}>Zkusit znovu</a>
           </>
         )}
       </div>
@@ -550,26 +548,15 @@ export default function OrderPage() {
             <button onClick={e => { e.stopPropagation(); setLightbox(false); }} className="btn btn-primary" style={{ padding: '12px 32px', fontSize: 14, fontWeight: 700 }}>
               Koupit & Stáhnout — {PRICE_CZK} Kč
             </button>
-            <button onClick={e => { e.stopPropagation(); setLightbox(false); }} className="btn" style={{ padding: '12px 20px', fontSize: 14 }}>
-              Zavřít
-            </button>
+            <button onClick={e => { e.stopPropagation(); setLightbox(false); }} className="btn" style={{ padding: '12px 20px', fontSize: 14 }}>Zavřít</button>
           </div>
         </div>
       )}
 
       <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes zoomIn {
-          from { opacity: 0; transform: scale(0.92); }
-          to { opacity: 1; transform: scale(1); }
-        }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes zoomIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
       `}</style>
     </main>
   );

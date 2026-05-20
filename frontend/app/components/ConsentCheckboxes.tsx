@@ -15,7 +15,7 @@ export default function ConsentCheckboxes({
 }: Props) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', margin: '1rem 0' }}>
-            {/* Checkbox 1 — VOP */}
+            {/* Checkbox 1 — VOP + souhlas s předčasným plněním */}
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', cursor: 'pointer' }}>
                 <input
                     type="checkbox"
@@ -25,12 +25,13 @@ export default function ConsentCheckboxes({
                 />
                 <span style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                     Souhlasím s{' '}
-                    <a href="/terms" target="_blank" rel="noopener noreferrer"
+                    <a href="/podminky" target="_blank" rel="noopener noreferrer"
                         style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
                         Všeobecnými obchodními podmínkami
                     </a>
-                    {' '}služby FastHDR. Beru na vědomí, že platba za provedenou úpravu je
-                    konečná a nevratná, s výjimkou prokazatelného technického selhání.
+                    {' '}a výslovně žádám o zahájení zpracování před uplynutím lhůty pro
+                    odstoupení od smlouvy. Beru na vědomí, že tímto ztrácím právo na
+                    odstoupení od smlouvy.
                     {' '}<span style={{ color: '#ef4444' }}>*</span>
                 </span>
             </label>
@@ -45,7 +46,7 @@ export default function ConsentCheckboxes({
                 />
                 <span style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                     Souhlasím se{' '}
-                    <a href="/privacy" target="_blank" rel="noopener noreferrer"
+                    <a href="/ochrana-soukromi" target="_blank" rel="noopener noreferrer"
                         style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
                         Zásadami ochrany osobních údajů
                     </a>

@@ -19,7 +19,6 @@ export async function sendExpiryReminders() {
         .lte('expires_at', in2days.toISOString());
 
     if (!orders?.length) {
-        console.log('Žádné blížící se expirace');
         return;
     }
 
@@ -65,11 +64,9 @@ export async function sendExpiryReminders() {
                     </html>
                 `,
             });
-            console.log(`Reminder odeslán: ${order.email} (${order.filename})`);
         } catch (err) {
             console.error(`Chyba při odesílání reminder pro ${order.email}:`, err);
         }
     }
 
-    console.log(`Celkem odesláno ${orders.length} reminder emailů`);
 }

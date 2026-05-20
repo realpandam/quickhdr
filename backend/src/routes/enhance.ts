@@ -20,6 +20,65 @@ const GOPAY_RETURN_URL = process.env.GOPAY_RETURN_URL || 'https://fasthdr.cz';
 const PRICE_CZK = parseInt(process.env.PRICE_CZK || '25');
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
+// ── Povolené typy souborů ─────────────────────────────────────────────────────
+const ALLOWED_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'heic', 'heif', 'avif', 'bmp', 'gif',
+  // RAW formáty
+  'arw', 'sr2', 'srf',   // Sony
+  'cr2', 'cr3', 'crw',   // Canon
+  'nef', 'nrw',          // Nikon
+  'raf',                  // Fuji
+  'orf',                  // Olympus
+  'rw2',                  // Panasonic
+  'pef',                  // Pentax
+  'kdc',                  // Kodak
+  'erf',                  // Epson
+  'dng',                  // Adobe DNG
+  'iiq',                  // Phase One
+  'mos',                  // Leaf
+  'mef',                  // Mamiya
+  'fff', '3fr',           // Hasselblad
+  'x3f',                  // Sigma
+  'rwl',                  // Leica
+  'srw',                  // Samsung
+]);
+
+// MIME typy které jsou jednoznačně nepovoleným obsahem (i po přejmenování)
+// Výjimka: application/octet-stream používají některé RAW soubory — nevylučujeme
+const BLOCKED_MIME_PREFIXES = ['text/', 'video/', 'audio/'];
+const BLOCKED_MIME_EXACT = [
+  'application/pdf', 'application/zip', 'application/x-rar-compressed',
+  'application/x-rar', 'application/x-msdownload', 'application/x-executable',
+  'application/x-sh', 'application/x-bat',
+];
+
+function isFileAllowed(file: Express.Multer.File): { ok: boolean; reason?: string } {
+  const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
+  const mime = file.mimetype.toLowerCase();
+
+  // 1. Zkontroluj extension
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    return {
+      ok: false,
+      reason: `Nepodporovaný formát souboru (.${ext || 'neznámý'}). Povoleny jsou JPG, PNG, TIFF, WEBP, HEIC a RAW formáty (ARW, CR2, NEF, DNG…).`,
+    };
+  }
+
+  // 2. Odmítni jednoznačně nebezpečné MIME prefixy
+  for (const blocked of BLOCKED_MIME_PREFIXES) {
+    if (mime.startsWith(blocked)) {
+      return { ok: false, reason: 'Nahraný soubor není platný obrázek.' };
+    }
+  }
+
+  // 3. Odmítni konkrétní nebezpečné MIME typy
+  if (BLOCKED_MIME_EXACT.includes(mime)) {
+    return { ok: false, reason: 'Nahraný soubor není platný obrázek.' };
+  }
+
+  return { ok: true };
+}
+
 function getMimeType(filename: string, fallback: string): string {
   const ext = path.extname(filename).toLowerCase();
   const mimeMap: Record<string, string> = {
@@ -42,10 +101,19 @@ function getMimeType(filename: string, fallback: string): string {
   return mimeMap[ext] ?? fallback;
 }
 
+// ── Upload (non-HDR) ──────────────────────────────────────────────────────────
 router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (req: Request, res: Response) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   const file = files['image']?.[0];
   if (!file) { res.status(400).json({ error: 'Žádný soubor nebyl nahrán' }); return; }
+
+  // ── Validace typu souboru ──
+  const validation = isFileAllowed(file);
+  if (!validation.ok) {
+    res.status(415).json({ error: validation.reason });
+    return;
+  }
+
   try {
     const correctMime = getMimeType(file.originalname, file.mimetype);
     const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
@@ -87,6 +155,7 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
   }
 });
 
+// ── Status ────────────────────────────────────────────────────────────────────
 router.get('/status/:imageId', async (req: Request, res: Response) => {
   try {
     const { imageId } = req.params;
@@ -98,6 +167,7 @@ router.get('/status/:imageId', async (req: Request, res: Response) => {
   }
 });
 
+// ── Enhanced download ─────────────────────────────────────────────────────────
 router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
   try {
     const { imageId } = req.params;
@@ -154,6 +224,7 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
   }
 });
 
+// ── HDR: Vytvoř order ─────────────────────────────────────────────────────────
 router.post('/hdr/order', async (req: Request, res: Response) => {
   try {
     const user_id = req.body.user_id || null;
@@ -175,10 +246,19 @@ router.post('/hdr/order', async (req: Request, res: Response) => {
   }
 });
 
+// ── HDR: Nahraj bracket ───────────────────────────────────────────────────────
 router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), async (req: Request, res: Response) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   const file = files['image']?.[0];
   if (!file) { res.status(400).json({ error: 'Žádný soubor nebyl nahrán' }); return; }
+
+  // ── Validace typu souboru ──
+  const validation = isFileAllowed(file);
+  if (!validation.ok) {
+    res.status(415).json({ error: validation.reason });
+    return;
+  }
+
   try {
     const correctMime = getMimeType(file.originalname, file.mimetype);
     const order_id = req.body.order_id;
@@ -202,6 +282,7 @@ router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), 
   }
 });
 
+// ── HDR: Spusť process ────────────────────────────────────────────────────────
 router.post('/hdr/order/:orderId/merge', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
@@ -227,6 +308,7 @@ router.post('/hdr/order/:orderId/merge', async (req: Request, res: Response) => 
   }
 });
 
+// ── HDR: Stav orderu ──────────────────────────────────────────────────────────
 router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
@@ -240,6 +322,7 @@ router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => 
   }
 });
 
+// ── Souhlas ───────────────────────────────────────────────────────────────────
 router.post('/consent', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
@@ -262,6 +345,20 @@ router.post('/consent', async (req: Request, res: Response) => {
   }
 });
 
+// ── Cron: expiry reminders ────────────────────────────────────────────────────
+router.get('/cron/expiry-reminders', async (req: Request, res: Response) => {
+  const cronSecret = req.headers['x-cron-secret'];
+  if (cronSecret !== process.env.CRON_SECRET) { res.status(401).json({ error: 'Unauthorized' }); return; }
+  try {
+    await sendExpiryReminders();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Chyba cron jobu:', err);
+    res.status(500).json({ error: 'Cron job selhal' });
+  }
+});
+
+// ── Autoenhance Webhook ───────────────────────────────────────────────────────
 router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
   res.status(200).json({ ok: true });
   try {
@@ -327,6 +424,7 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
   } catch (err) { console.error('Webhook chyba:', err); }
 });
 
+// ── Notify (fallback) ─────────────────────────────────────────────────────────
 router.post('/notify', async (req: Request, res: Response) => {
   try {
     const { user_id, filename, image_id, upload_batch_id } = req.body;
@@ -354,6 +452,7 @@ router.post('/notify', async (req: Request, res: Response) => {
   }
 });
 
+// ── Email šablony ─────────────────────────────────────────────────────────────
 function notifyBatchEmailHtml(count: number, frontendUrl: string): string {
   const year = new Date().getFullYear();
   return `<!DOCTYPE html>
@@ -366,82 +465,54 @@ function notifyBatchEmailHtml(count: number, frontendUrl: string): string {
     <body style="margin:0;padding:0;background:#09090F;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;color:#ffffff;">
       <div style="display:none;max-height:0;overflow:hidden;">Všechny vaše fotografie (${count}) byly úspěšně zpracovány.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090F;padding:32px 16px;">
-        <tr>
-          <td align="center">
-            <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
-              <tr>
-                <td align="center" style="padding:0 0 32px;">
-                  <img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;">
-                </td>
-              </tr>
-              <tr>
-                <td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
-                    <tr>
-                      <td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;">
-                        <span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">● Zpracováno</span>
-                      </td>
-                    </tr>
-                  </table>
-                  <h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">Vaše fotografie<br>jsou připraveny</h1>
-                  <p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">Všech <strong style="color:#ffffff;font-weight:600;">${count} fotografií</strong> bylo úspěšně zpracováno pomocí AI modelu v5. Prohlédněte si náhledy a stáhněte výsledky v plném rozlišení.</p>
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
-                    <tr>
-                      <td style="background:#7B5CF0;border-radius:10px;">
-                        <a href="${frontendUrl}/dashboard" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Zobrazit fotografie →</a>
-                      </td>
-                    </tr>
-                  </table>
-                  <div style="height:1px;background:#22222E;margin:0 0 24px;"></div>
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Počet fotek</td>
-                      <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${count}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena za fotku</td>
-                      <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td>
-                      <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření</td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td>
-                      <td style="padding:8px 0;font-size:13px;"><a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a></td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:24px 32px 0;">
-                  <p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">Potřebujete pomoc? Napište nám na <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a></p>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:40px 32px 16px;border-top:1px solid #16161F;">
-                  <p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;">
-                    <strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>
-                    Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br>
-                    <a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a> · <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a> · <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a>
-                  </p>
-                  <p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">© ${year} FASTHDR. Všechna práva vyhrazena.</p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
+        <tr><td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
+            <tr><td align="center" style="padding:0 0 32px;">
+              <img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;">
+            </td></tr>
+            <tr><td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
+                <tr><td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;">
+                  <span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">● Zpracováno</span>
+                </td></tr>
+              </table>
+              <h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">Vaše fotografie<br>jsou připraveny</h1>
+              <p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">Všech <strong style="color:#ffffff;font-weight:600;">${count} fotografií</strong> bylo úspěšně zpracováno pomocí AI modelu v5. Prohlédněte si náhledy a stáhněte výsledky v plném rozlišení.</p>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
+                <tr><td style="background:#7B5CF0;border-radius:10px;">
+                  <a href="${frontendUrl}/dashboard" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Zobrazit fotografie →</a>
+                </td></tr>
+              </table>
+              <div style="height:1px;background:#22222E;margin:0 0 24px;"></div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Počet fotek</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${count}</td></tr>
+                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena za fotku</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td></tr>
+                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření</td></tr>
+                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td><td style="padding:8px 0;font-size:13px;"><a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a></td></tr>
+              </table>
+            </td></tr>
+            <tr><td style="padding:24px 32px 0;">
+              <p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">Potřebujete pomoc? Napište nám na <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a></p>
+            </td></tr>
+            <tr><td style="padding:40px 32px 16px;border-top:1px solid #16161F;">
+              <p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;">
+                <strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>
+                Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br>
+                <a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a> · <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a> · <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a>
+              </p>
+              <p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">© ${year} FASTHDR. Všechna práva vyhrazena.</p>
+            </td></tr>
+          </table>
+        </td></tr>
       </table>
     </body>
     </html>`;
 }
 
-// ── Helper: email šablona ────────────────────────────────────────────────────
 function notifyEmailHtml(filename: string, imageId: string, frontendUrl: string): string {
   const safeName = filename ?? 'bez názvu';
   const safeRef = filename ?? imageId;
   const year = new Date().getFullYear();
-
   return `<!DOCTYPE html>
     <html lang="cs">
     <head>
@@ -452,119 +523,47 @@ function notifyEmailHtml(filename: string, imageId: string, frontendUrl: string)
       <title>Zpracování dokončeno — FastHDR</title>
     </head>
     <body style="margin:0;padding:0;background:#09090F;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;color:#ffffff;-webkit-font-smoothing:antialiased;">
-      <!-- Hidden preheader -->
-      <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#09090F;">
-        Vaše fotografie ${safeName} byla úspěšně zpracována. Prohlédněte si náhled.
-      </div>
-
+      <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#09090F;">Vaše fotografie ${safeName} byla úspěšně zpracována. Prohlédněte si náhled.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090F;padding:32px 16px;">
-        <tr>
-          <td align="center">
-            <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
-
-              <!-- Logo header -->
-              <tr>
-                <td align="center" style="padding:0 0 32px;">
-                  <img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;outline:none;text-decoration:none;">
-                </td>
-              </tr>
-
-              <!-- Hero card -->
-              <tr>
-                <td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;">
-
-                  <!-- Status badge -->
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
-                    <tr>
-                      <td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;">
-                        <span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">
-                          ● Zpracováno
-                        </span>
-                      </td>
-                    </tr>
-                  </table>
-
-                  <!-- Heading -->
-                  <h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">
-                    Vaše fotografie<br>je připravena
-                  </h1>
-
-                  <!-- Description -->
-                  <p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">
-                    Soubor <strong style="color:#ffffff;font-weight:600;">${safeName}</strong> byl úspěšně zpracován pomocí AI modelu v5. Prohlédněte si náhled zdarma a stáhněte si výsledek v plném rozlišení.
-                  </p>
-
-                  <!-- CTA Button -->
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
-                    <tr>
-                      <td style="background:#7B5CF0;border-radius:10px;">
-                        <a href="${frontendUrl}/dashboard"
-                          style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">
-                          Zobrazit fotografii →
-                        </a>
-                      </td>
-                    </tr>
-                  </table>
-
-                  <!-- Divider -->
-                  <div style="height:1px;background:#22222E;margin:0 0 24px;"></div>
-
-                  <!-- Detail rows -->
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Soubor</td>
-                      <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;word-break:break-all;">${safeRef}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena</td>
-                      <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td>
-                      <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření fotografie</td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td>
-                      <td style="padding:8px 0;font-size:13px;">
-                        <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a>
-                      </td>
-                    </tr>
-                  </table>
-
-                </td>
-              </tr>
-
-              <!-- Help row -->
-              <tr>
-                <td style="padding:24px 32px 0;">
-                  <p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">
-                    Potřebujete pomoc? Napište nám na
-                    <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a>
-                  </p>
-                </td>
-              </tr>
-
-              <!-- Footer -->
-              <tr>
-                <td style="padding:40px 32px 16px;border-top:1px solid #16161F;margin-top:32px;">
-                  <p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;">
-                    <strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>
-                    Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br>
-                    <a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a>
-                    ·
-                    <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a>
-                    ·
-                    <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a>
-                  </p>
-                  <p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">
-                    © ${year} FASTHDR. Všechna práva vyhrazena.
-                  </p>
-                </td>
-              </tr>
-
-            </table>
-          </td>
-        </tr>
+        <tr><td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
+            <tr><td align="center" style="padding:0 0 32px;">
+              <img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;outline:none;text-decoration:none;">
+            </td></tr>
+            <tr><td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
+                <tr><td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;">
+                  <span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">● Zpracováno</span>
+                </td></tr>
+              </table>
+              <h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">Vaše fotografie<br>je připravena</h1>
+              <p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">Soubor <strong style="color:#ffffff;font-weight:600;">${safeName}</strong> byl úspěšně zpracován pomocí AI modelu v5. Prohlédněte si náhled zdarma a stáhněte si výsledek v plném rozlišení.</p>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
+                <tr><td style="background:#7B5CF0;border-radius:10px;">
+                  <a href="${frontendUrl}/dashboard" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">Zobrazit fotografii →</a>
+                </td></tr>
+              </table>
+              <div style="height:1px;background:#22222E;margin:0 0 24px;"></div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Soubor</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;word-break:break-all;">${safeRef}</td></tr>
+                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td></tr>
+                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření fotografie</td></tr>
+                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td><td style="padding:8px 0;font-size:13px;"><a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a></td></tr>
+              </table>
+            </td></tr>
+            <tr><td style="padding:24px 32px 0;">
+              <p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">Potřebujete pomoc? Napište nám na <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a></p>
+            </td></tr>
+            <tr><td style="padding:40px 32px 16px;border-top:1px solid #16161F;margin-top:32px;">
+              <p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;">
+                <strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>
+                Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br>
+                <a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a> · <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a> · <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a>
+              </p>
+              <p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">© ${year} FASTHDR. Všechna práva vyhrazena.</p>
+            </td></tr>
+          </table>
+        </td></tr>
       </table>
     </body>
     </html>`;

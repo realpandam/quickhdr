@@ -38,7 +38,6 @@ router.get('/invoice-retry', async (req: Request, res: Response) => {
   if (!isAuthorized(req)) { res.status(401).json({ error: 'Unauthorized' }); return; }
   try {
     const result = await retryFailedInvoices();
-    console.log('[Cron] invoice-retry výsledek:', result);
     res.json({ ok: true, job: 'invoice-retry', ...result });
   } catch (err) {
     console.error('[Cron] invoice-retry selhal:', err);
@@ -74,7 +73,6 @@ router.get('/all', async (req: Request, res: Response) => {
     results.invoiceRetry = { ok: false, error: (err as Error).message };
   }
 
-  console.log('[Cron] /all výsledek:', results);
   res.json({ ok: true, results });
 });
 

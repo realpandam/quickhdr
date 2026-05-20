@@ -23,12 +23,18 @@ interface Props {
 
 function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; label: string }) {
   return (
-    <label className="toggle-wrap" onClick={onToggle} style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' as const, cursor: 'pointer' }}>
+    <div
+      role="switch"
+      aria-checked={on}
+      onClick={onToggle}
+      className="toggle-wrap"
+      style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' as const, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+    >
       <div className={`toggle-track ${on ? 'on' : ''}`}>
         <div className="toggle-thumb" />
       </div>
       {label}
-    </label>
+    </div>
   );
 }
 

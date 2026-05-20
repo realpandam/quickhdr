@@ -158,7 +158,6 @@ export class UolService {
 
     const contactId: string = res.data?.contact_id;
     if (!contactId) throw new Error('[UOL] createContact: chybí contact_id v response');
-    console.log(`[UOL] Kontakt vytvořen: ${contactId} (${input.name})`);
     return contactId;
   }
 
@@ -167,7 +166,6 @@ export class UolService {
     if (input.company_number) {
       const byIco = await this.findContactByIco(input.company_number);
       if (byIco) {
-        console.log(`[UOL] Kontakt nalezen (IČO ${input.company_number}): ${byIco}`);
         return byIco;
       }
     }
@@ -175,7 +173,6 @@ export class UolService {
     // B2C i B2B fallback — hledej podle external_id
     const byExtId = await this.findContactByExternalId(input.external_id);
     if (byExtId) {
-      console.log(`[UOL] Kontakt nalezen (ext_id ${input.external_id}): ${byExtId}`);
       return byExtId;
     }
 
@@ -227,7 +224,6 @@ export class UolService {
 
     const data = res.data as UolInvoiceResult;
     if (!data?.invoice_id) throw new Error('[UOL] createInvoice: chybí invoice_id v response');
-    console.log(`[UOL] Faktura vystavena: ${data.invoice_id} (order ${input.order_id})`);
     return data;
   }
 

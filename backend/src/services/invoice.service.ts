@@ -99,7 +99,6 @@ export async function createInvoiceForOrder(orderId: string): Promise<void> {
   // ── 3. Idempotence — check v DB ───────────────────────────────────────────
 
   if (order.uol_invoice_id) {
-    console.log(`[Invoice] Order ${orderId} má fakturu ${order.uol_invoice_id} — přeskakuji`);
     return;
   }
 
@@ -113,7 +112,6 @@ export async function createInvoiceForOrder(orderId: string): Promise<void> {
 
   const existingInvoiceId = await uol.findInvoiceByExternalId(orderId);
   if (existingInvoiceId) {
-    console.log(`[Invoice] Faktura ${existingInvoiceId} nalezena v UOL — ukládám do DB`);
     await supabase.from('orders').update({
       uol_invoice_id:      existingInvoiceId,
       uol_invoice_sent_at: new Date().toISOString(),
@@ -218,7 +216,6 @@ export async function createInvoiceForOrder(orderId: string): Promise<void> {
       uol_invoice_error:   null,
     }).eq('id', orderId);
 
-    console.log(`[Invoice] ✅ Order ${orderId} → faktura ${invoice.invoice_id} (${customerEmail})`);
 
   } catch (err) {
     const message = (err as Error).message ?? String(err);
@@ -247,11 +244,9 @@ export async function retryFailedInvoices(): Promise<{ processed: number; failed
     .limit(20);
 
   if (error || !orders?.length) {
-    console.log('[Invoice] retryFailedInvoices: nic k opakování');
     return { processed: 0, failed: 0 };
   }
 
-  console.log(`[Invoice] Retry: ${orders.length} orders`);
   let processed = 0, failed = 0;
 
   for (const { id } of orders) {
