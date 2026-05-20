@@ -19,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {/* Dropbox Chooser SDK — musí být načten staticky */}
         <script
+          async
           src="https://www.dropbox.com/static/api/2/dropins.js"
           id="dropboxjs"
           data-app-key={process.env.NEXT_PUBLIC_DROPBOX_APP_KEY}
