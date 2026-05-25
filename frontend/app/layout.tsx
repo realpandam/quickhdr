@@ -17,13 +17,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Barlow:wght@700;800;900&display=swap" rel="stylesheet" />
 
-        {/* Dropbox Chooser SDK — musí být načten staticky */}
-        <script
-          async
-          src="https://www.dropbox.com/static/api/2/dropins.js"
-          id="dropboxjs"
-          data-app-key={process.env.NEXT_PUBLIC_DROPBOX_APP_KEY}
-        />
+        {/* bfcache fix — beforeInteractive zajistí spuštění i po bfcache restore */}
+        <script dangerouslySetInnerHTML={{
+          __html: `
+            window.addEventListener('pageshow', function(e) {
+              if (e.persisted) { window.location.reload(); }
+            });
+          `
+        }} />
 
         {/* Theme init — musí být v head před renderem */}
         <script dangerouslySetInnerHTML={{
@@ -36,19 +37,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         }} />
       </head>
       <body>
-        {/* bfcache fix — beforeInteractive zajistí spuštění i po bfcache restore */}
-        <Script
-          id="bfcache-fix"
-          strategy="beforeInteractive"
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.addEventListener('pageshow', function(e) {
-                if (e.persisted) { window.location.reload(); }
-              });
-            `
-          }}
-        />
-
         <SmoothScroll />
         {children}
         <SessionTimeout />
