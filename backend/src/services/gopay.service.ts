@@ -72,11 +72,6 @@ export async function createPayment(params: CreatePaymentParams): Promise<GoPayP
         payer: {
           // Nabídne všechny metody které má obchodník povolené v GoPay administraci.
           // Pokud GoPay účet nemá Apple Pay / Google Pay aktivované, automaticky je vynechá.
-          allowed_payment_instruments: [
-            'PAYMENT_CARD',   // Visa, Mastercard, Maestro — vždy dostupné
-            'APPLE_PAY',      // Vyžaduje aktivaci v GoPay administraci
-            'GOOGLE_PAY',     // Vyžaduje aktivaci v GoPay administraci
-          ],
           contact: {
             email: params.email || '',
             first_name: params.firstName || '',
