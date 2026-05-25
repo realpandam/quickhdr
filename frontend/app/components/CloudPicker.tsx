@@ -31,13 +31,7 @@ declare global {
         };
         gapi: {
             load: (api: string, callback: () => void) => void;
-            picker: {
-                PickerBuilder: new () => any;
-                ViewId: { DOCS: string };
-                DocsView: new (viewId: string) => any;
-                Action: { PICKED: string };
-                Feature: { MULTISELECT_ENABLED: string };
-            };
+            picker: any;
         };
     }
 }
@@ -57,7 +51,6 @@ const DROPBOX_EXTENSIONS = [
 export default function CloudPicker({ onFiles }: Props) {
     const tokenClient = useRef<{ requestAccessToken: () => void } | null>(null);
     const accessToken = useRef<string>('');
-    const pickerReady = useRef(false);
 
     // ── Dropbox Chooser SDK ───────────────────────────────────────────────
     const openDropbox = useCallback(() => {
@@ -77,7 +70,6 @@ export default function CloudPicker({ onFiles }: Props) {
                     })
                 );
                 onFiles(downloaded);
-                // Vrať uživatele zpět na editor
                 document.getElementById('editor')?.scrollIntoView({ behavior: 'smooth' });
             },
             cancel: () => {
@@ -91,49 +83,50 @@ export default function CloudPicker({ onFiles }: Props) {
 
     // ── Google Drive Picker ───────────────────────────────────────────────
     const showPicker = useCallback((token: string) => {
-        const build = () => {
-            try {
-                const picker = window.gapi.picker;
+        // Vždy znovu načti picker — zajistí správnou inicializaci
+        window.gapi.load('picker', () => {
+            setTimeout(() => {
+                try {
+                    const pickerRoot = window.gapi.picker;
 
-                const docsView = new picker.DocsView(picker.ViewId.DOCS);
-                docsView.setMimeTypes(RAW_MIME_TYPES);
+                    // Google někdy dává API přímo, někdy pod .api
+                    const api = pickerRoot?.ViewId ? pickerRoot : pickerRoot?.api;
 
-                const p = new picker.PickerBuilder()
-                    .addView(docsView)
-                    .setOAuthToken(token)
-                    .setDeveloperKey(process.env.NEXT_PUBLIC_GOOGLE_API_KEY!)
-                    .setAppId('117631966298')
-                    .setOrigin(window.location.protocol + '//' + window.location.host)
-                    .enableFeature(picker.Feature?.MULTISELECT_ENABLED ?? 'multiselectEnabled')
-                    .setCallback((data: any) => {
-                        if (data.action !== 'picked') return;
-                        Promise.all(
-                            data.docs.map(async (doc: any) => {
-                                const res = await fetch(
-                                    `https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`,
-                                    { headers: { Authorization: `Bearer ${token}` } }
-                                );
-                                const blob = await res.blob();
-                                return new File([blob], doc.name, { type: doc.mimeType });
-                            })
-                        ).then(onFiles);
-                    })
-                    .build();
+                    if (!api?.ViewId) {
+                        console.error('Google Picker API není dostupné', pickerRoot);
+                        return;
+                    }
 
-                p.setVisible(true);
-            } catch (err) {
-                console.error('Picker error:', err);
-            }
-        };
+                    const docsView = new api.DocsView(api.ViewId.DOCS);
 
-        if (pickerReady.current) {
-            build();
-        } else {
-            window.gapi.load('picker', () => {
-                pickerReady.current = true;
-                build();
-            });
-        }
+                    const p = new api.PickerBuilder()
+                        .addView(docsView)
+                        .setOAuthToken(token)
+                        .setDeveloperKey(process.env.NEXT_PUBLIC_GOOGLE_API_KEY!)
+                        .setAppId('117631966298')
+                        .setOrigin(window.location.protocol + '//' + window.location.host)
+                        .enableFeature(api.Feature?.MULTISELECT_ENABLED ?? 'multiselectEnabled')
+                        .setCallback((data: any) => {
+                            if (data.action !== 'picked') return;
+                            Promise.all(
+                                data.docs.map(async (doc: any) => {
+                                    const res = await fetch(
+                                        `https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`,
+                                        { headers: { Authorization: `Bearer ${token}` } }
+                                    );
+                                    const blob = await res.blob();
+                                    return new File([blob], doc.name, { type: doc.mimeType });
+                                })
+                            ).then(onFiles);
+                        })
+                        .build();
+
+                    p.setVisible(true);
+                } catch (err) {
+                    console.error('Picker error:', err);
+                }
+            }, 100);
+        });
     }, [onFiles]);
 
     const handleGoogleDrive = useCallback(() => {
@@ -158,11 +151,6 @@ export default function CloudPicker({ onFiles }: Props) {
             <Script
                 src="https://apis.google.com/js/api.js"
                 strategy="afterInteractive"
-                onLoad={() => {
-                    window.gapi.load('picker', () => {
-                        pickerReady.current = true;
-                    });
-                }}
             />
             <Script
                 src="https://accounts.google.com/gsi/client"
