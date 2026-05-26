@@ -24,12 +24,10 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
             return;
         }
 
-        // Všechny image_ids k zaplacení — single nebo multi
         const allImageIds: string[] = image_ids && Array.isArray(image_ids) && image_ids.length > 0
             ? image_ids
             : [image_id];
 
-        // Zjisti počet a spočítej částku z DB (bezpečnější než věřit frontendu)
         const { data: pendingOrders } = await supabase
             .from('orders')
             .select('image_id, amount_czk')
@@ -47,7 +45,6 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
         if (IS_MOCK) {
             const mockPaymentId = `MOCK-${Date.now()}`;
 
-            // Ulož payment info na všechny orders najednou
             await supabase.from('orders')
                 .update({
                     gopay_order_id: orderId,
@@ -71,7 +68,6 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
                 notifyUrl: `${process.env.BACKEND_URL || 'https://api.fasthdr.cz'}/api/payments/notify`,
             });
 
-            // Ulož payment info na všechny orders najednou
             await supabase.from('orders')
                 .update({
                     gopay_order_id: orderId,
@@ -93,13 +89,13 @@ router.post('/create-checkout', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 // GET /api/payments/verify/:paymentId
 // Frontend volá po návratu z platební brány
+// Email se NEposílá — posílá ho /notify webhook
 // ─────────────────────────────────────────────
 router.get('/verify/:paymentId', async (req: Request, res: Response) => {
     try {
         const { paymentId } = req.params;
 
         if (paymentId.startsWith('MOCK-')) {
-            // Najdi všechny orders s tímto payment_id (může jich být víc při multi platbě)
             const { data: orders } = await supabase
                 .from('orders')
                 .select('*')
@@ -110,19 +106,17 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
                 return;
             }
 
-            // Označ všechny jako zaplacené
             await supabase.from('orders')
                 .update({ payment_status: 'paid' })
                 .eq('gopay_payment_id', paymentId);
 
-            // 🔔 UOL Fakturace — fire & forget pro každý order
             for (const o of orders) {
                 createInvoiceForOrder(o.id).catch(err =>
                     console.error('[Payments] Invoice selhala pro order', o.id, err)
                 );
             }
 
-            // Email pošli jednou — shrnutí celé platby
+            // MOCK: email posíláme zde protože /notify se u mock nepovolá
             const primaryOrder = orders[0];
             if (primaryOrder.email) {
                 await sendConfirmationEmail(
@@ -138,7 +132,6 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
         }
 
         // ── GoPay ověření ────────────────────────────────
-        // Zkontroluj jestli už všechny jsou paid (idempotence)
         const { data: existingOrders } = await supabase
             .from('orders')
             .select('*')
@@ -157,12 +150,10 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
             return;
         }
 
-        // Označ všechny orders se stejným payment_id jako paid
         await supabase.from('orders')
             .update({ payment_status: 'paid' })
             .eq('gopay_payment_id', paymentId);
 
-        // 🔔 UOL Fakturace — fire & forget pro každý order
         for (const o of existingOrders ?? []) {
             createInvoiceForOrder(o.id).catch(err =>
                 console.error('[Payments] Invoice selhala pro order', o.id, err)
@@ -170,22 +161,6 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
         }
 
         const primaryOrder = existingOrders?.[0];
-        let customerEmail = primaryOrder?.email || payment.payer?.contact?.email;
-
-        if (!customerEmail && primaryOrder?.user_id) {
-            const { data: userData } = await supabase.auth.admin.getUserById(primaryOrder.user_id);
-            customerEmail = userData?.user?.email;
-        }
-
-        if (customerEmail) {
-            await sendConfirmationEmail(
-                customerEmail,
-                primaryOrder?.filename ?? '',
-                primaryOrder?.image_id ?? '',
-                existingOrders?.length ?? 1
-            );
-        }
-
         res.json({ image_id: primaryOrder?.image_id, paid: true, count: existingOrders?.length ?? 1 });
 
     } catch (error) {
@@ -197,6 +172,7 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 // GET /api/payments/notify
 // GoPay webhook — volá GoPay při změně stavu platby
+// Posílá email po zaplacení
 // ─────────────────────────────────────────────
 router.get('/notify', async (req: Request, res: Response) => {
     try {
@@ -220,7 +196,6 @@ router.get('/notify', async (req: Request, res: Response) => {
                     .update({ payment_status: 'paid' })
                     .eq('gopay_payment_id', paymentId);
 
-                // 🔔 UOL Fakturace — fire & forget
                 for (const o of orders) {
                     createInvoiceForOrder(o.id).catch(err =>
                         console.error('[Payments] Invoice selhala pro order', o.id, err)
@@ -249,7 +224,6 @@ router.get('/notify', async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────
 // Helper — email notifikace po platbě
-// Podporuje single i multi (count > 1)
 // ─────────────────────────────────────────────
 async function sendConfirmationEmail(email: string, filename: string, imageId: string, count: number = 1) {
     const isMulti = count > 1;
