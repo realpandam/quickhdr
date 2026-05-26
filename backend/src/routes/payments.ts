@@ -195,10 +195,10 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────
-// POST /api/payments/notify
+// GET /api/payments/notify
 // GoPay webhook — volá GoPay při změně stavu platby
 // ─────────────────────────────────────────────
-router.post('/notify', async (req: Request, res: Response) => {
+router.get('/notify', async (req: Request, res: Response) => {
     try {
         const paymentId = req.query.id as string;
 
