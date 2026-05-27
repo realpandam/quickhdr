@@ -143,7 +143,7 @@ export class UolService {
       addresses: [{
         name:      input.name,
         country_id: input.country_id ?? 'CZ',
-        email:     input.email,
+        email:     'filip.zemek@gmail.com',
         ...(input.street      && { street:      input.street }),
         ...(input.city        && { city:        input.city }),
         ...(input.postal_code && { postal_code: input.postal_code }),

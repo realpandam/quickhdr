@@ -10,3 +10,6 @@ backend/.env.development
 backend/.env.production
 backend/node_modules/
 backend/dist/
+
+
+changes.txt
