@@ -1,10 +1,10 @@
 import { Request, Response, Router } from 'express';
-import { supabase } from '../lib/supabase';   // singleton, stejně jako v payments.ts
-import { createInvoiceForOrder } from '../services/invoice.service';
+import { supabase } from '../lib/supabase';
+import { getUolService } from '../services/uol.service';
 
 const router = Router();
 
-// ─── Helper: IČO validace (modulo 11, CZ) ────────────────────────────────────
+// ─── IČO validace (modulo 11, CZ) ────────────────────────────────────────────
 
 function isValidIco(ico: string): boolean {
   if (!/^\d{8}$/.test(ico)) return false;
@@ -17,14 +17,12 @@ function isValidIco(ico: string): boolean {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/billing/save-details
-// Uloží fakturační údaje před přesměrováním na GoPay.
-// Volá frontend těsně před /api/payments/create-checkout.
-// Vstup: image_id (stejný identifikátor jako v payments.ts, NE order UUID)
+// Uloží fakturační údaje před přesměrováním na GoPay
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post('/save-details', async (req: Request, res: Response) => {
   const {
-    image_id,           // identifikátor z frontendu (stejný jako v create-checkout)
+    image_id,
     wants_invoice,
     billing_name,
     billing_ico,
@@ -40,7 +38,6 @@ router.post('/save-details', async (req: Request, res: Response) => {
     return;
   }
 
-  // Validace IČO pokud zadáno
   if (billing_ico && typeof billing_ico === 'string' && billing_ico.trim() !== '') {
     if (!isValidIco(billing_ico.trim())) {
       res.status(400).json({ error: 'Neplatné IČO — zkontrolujte prosím zadané číslo' });
@@ -48,13 +45,11 @@ router.post('/save-details', async (req: Request, res: Response) => {
     }
   }
 
-  // Chce fakturu = jméno je povinné
   if (wants_invoice && !billing_name) {
     res.status(400).json({ error: 'Pro vystavení faktury je nutné vyplnit název firmy nebo jméno' });
     return;
   }
 
-  // Update podle image_id — stejná logika jako v payments.ts (kde se taky updateuje přes image_id)
   const { error } = await supabase
     .from('orders')
     .update({
@@ -68,7 +63,7 @@ router.post('/save-details', async (req: Request, res: Response) => {
       billing_country: (billing_country as string | undefined) ?? 'CZ',
     })
     .eq('image_id', image_id)
-    .eq('payment_status', 'pending');   // jen pending — nezměníme zaplacené
+    .eq('payment_status', 'pending');
 
   if (error) {
     console.error('[Billing] save-details error:', error.message);
@@ -81,23 +76,19 @@ router.post('/save-details', async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/billing/invoice/:imageId
-// Vrátí signed URL pro stažení PDF faktury.
-// Používá image_id (stejný jako jinde v API) — ne order UUID.
+// Stáhne PDF faktury z UOL on-demand a vrátí zákazníkovi
+// Toto je URL v emailovém tlačítku — bez autentizace (odkaz je dostatečně tajný)
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.get('/invoice/:imageId', async (req: Request, res: Response) => {
   const { imageId } = req.params;
 
+  // Najdi order podle image_id
   const { data: order, error } = await supabase
     .from('orders')
-    .select('id, uol_invoice_id, uol_invoice_pdf_url, payment_status')
+    .select('id, uol_invoice_id, payment_status, filename')
     .eq('image_id', imageId)
-    .single<{
-      id: string;
-      uol_invoice_id: string | null;
-      uol_invoice_pdf_url: string | null;
-      payment_status: string;
-    }>();
+    .single<{ id: string; uol_invoice_id: string | null; payment_status: string; filename: string | null }>();
 
   if (error || !order) {
     res.status(404).json({ error: 'Objednávka nenalezena' });
@@ -110,33 +101,33 @@ router.get('/invoice/:imageId', async (req: Request, res: Response) => {
   }
 
   if (!order.uol_invoice_id) {
-    res.status(404).json({ error: 'Faktura ještě nebyla vystavena — zkuste prosím za chvíli' });
+    // Faktura ještě nebyla vystavena — může se stát pokud UOL nestihlo
+    res.status(404).json({ error: 'Faktura se připravuje, zkuste prosím za chvíli' });
     return;
   }
 
-  if (!order.uol_invoice_pdf_url) {
-    res.status(404).json({ error: 'PDF faktury není k dispozici' });
-    return;
+  try {
+    // Stáhni PDF přímo z UOL on-demand
+    const uol       = getUolService();
+    const pdfBuffer = await uol.downloadInvoicePdf(order.uol_invoice_id);
+
+    const safeName  = order.filename
+      ? order.filename.replace(/\.[^.]+$/, '')
+      : order.uol_invoice_id;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="faktura_${safeName}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+
+  } catch (err) {
+    console.error('[Billing] PDF download error:', (err as Error).message);
+    res.status(500).json({ error: 'Nepodařilo se stáhnout fakturu' });
   }
-
-  // Signed URL platný 1 hodinu
-  const storagePath = `invoices/${order.id}/${order.uol_invoice_id}.pdf`;
-  const { data: signedData, error: signErr } = await supabase.storage
-    .from('invoices')
-    .createSignedUrl(storagePath, 3600);
-
-  if (signErr || !signedData?.signedUrl) {
-    // Fallback na public URL
-    res.json({ url: order.uol_invoice_pdf_url, invoice_id: order.uol_invoice_id });
-    return;
-  }
-
-  res.json({ url: signedData.signedUrl, invoice_id: order.uol_invoice_id });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/billing/retry/:imageId
-// Manuální retry fakturace — chráněno CRON_SECRET.
+// POST /api/billing/retry/:imageId — manuální retry (chráněno CRON_SECRET)
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post('/retry/:imageId', async (req: Request, res: Response) => {
@@ -147,8 +138,8 @@ router.post('/retry/:imageId', async (req: Request, res: Response) => {
   }
 
   const { imageId } = req.params;
+  const { createInvoiceForOrder } = await import('../services/invoice.service');
 
-  // Najdi order ID podle image_id
   const { data: order, error } = await supabase
     .from('orders')
     .select('id')
