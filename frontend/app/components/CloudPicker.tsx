@@ -158,7 +158,7 @@ export default function CloudPicker({ onFiles }: Props) {
                 onLoad={() => {
                     tokenClient.current = window.google.accounts.oauth2.initTokenClient({
                         client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
-                        scope: 'https://www.googleapis.com/auth/drive.readonly',
+                        scope: 'https://www.googleapis.com/auth/drive.file',
                         callback: (response) => {
                             accessToken.current = response.access_token;
                             showPicker(response.access_token);
