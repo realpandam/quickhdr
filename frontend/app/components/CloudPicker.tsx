@@ -36,17 +36,14 @@ declare global {
     }
 }
 
-const RAW_MIME_TYPES = [
-    'image/jpeg', 'image/png', 'image/webp', 'image/tiff',
-    'image/heic', 'image/heif', 'image/avif', 'image/gif', 'image/bmp',
-].join(',');
-
 const DROPBOX_EXTENSIONS = [
     '.jpg', '.jpeg', '.png', '.webp', '.tiff', '.tif', '.heic', '.heif',
     '.avif', '.gif', '.bmp', '.arw', '.cr2', '.cr3', '.nef', '.nrw',
     '.dng', '.raf', '.orf', '.rw2', '.pef', '.sr2', '.srf', '.srw',
     '.kdc', '.erf', '.iiq', '.mos', '.mef', '.fff', '.3fr', '.x3f', '.rwl',
 ];
+
+const BATCH_SIZE = 5;
 
 export default function CloudPicker({ onFiles }: Props) {
     const tokenClient = useRef<{ requestAccessToken: () => void } | null>(null);
@@ -61,15 +58,21 @@ export default function CloudPicker({ onFiles }: Props) {
 
         window.Dropbox.choose({
             success: async (files) => {
-                const downloaded = await Promise.all(
-                    files.map(async (f) => {
-                        const url = f.link.replace('dl=0', 'dl=1');
-                        const res = await fetch(url);
-                        const blob = await res.blob();
-                        return new File([blob], f.name, { type: blob.type });
-                    })
-                );
-                onFiles(downloaded);
+                // Stahuj po dávkách — zabrání pádu při 100+ souborech
+                const result: File[] = [];
+                for (let i = 0; i < files.length; i += BATCH_SIZE) {
+                    const batch = files.slice(i, i + BATCH_SIZE);
+                    const batchFiles = await Promise.all(
+                        batch.map(async (f) => {
+                            const url = f.link.replace('dl=0', 'dl=1');
+                            const res = await fetch(url);
+                            const blob = await res.blob();
+                            return new File([blob], f.name, { type: blob.type });
+                        })
+                    );
+                    result.push(...batchFiles);
+                }
+                onFiles(result);
                 document.getElementById('editor')?.scrollIntoView({ behavior: 'smooth' });
             },
             cancel: () => {
@@ -83,13 +86,10 @@ export default function CloudPicker({ onFiles }: Props) {
 
     // ── Google Drive Picker ───────────────────────────────────────────────
     const showPicker = useCallback((token: string) => {
-        // Vždy znovu načti picker — zajistí správnou inicializaci
         window.gapi.load('picker', () => {
             setTimeout(() => {
                 try {
                     const pickerRoot = window.gapi.picker;
-
-                    // Google někdy dává API přímo, někdy pod .api
                     const api = pickerRoot?.ViewId ? pickerRoot : pickerRoot?.api;
 
                     if (!api?.ViewId) {
@@ -106,18 +106,25 @@ export default function CloudPicker({ onFiles }: Props) {
                         .setAppId('117631966298')
                         .setOrigin(window.location.protocol + '//' + window.location.host)
                         .enableFeature(api.Feature?.MULTISELECT_ENABLED ?? 'multiselectEnabled')
-                        .setCallback((data: any) => {
+                        .setCallback(async (data: any) => {
                             if (data.action !== 'picked') return;
-                            Promise.all(
-                                data.docs.map(async (doc: any) => {
-                                    const res = await fetch(
-                                        `https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`,
-                                        { headers: { Authorization: `Bearer ${token}` } }
-                                    );
-                                    const blob = await res.blob();
-                                    return new File([blob], doc.name, { type: doc.mimeType });
-                                })
-                            ).then(onFiles);
+                            // Stahuj po dávkách — zabrání pádu při 100+ souborech
+                            const result: File[] = [];
+                            for (let i = 0; i < data.docs.length; i += BATCH_SIZE) {
+                                const batch = data.docs.slice(i, i + BATCH_SIZE);
+                                const batchFiles = await Promise.all(
+                                    batch.map(async (doc: any) => {
+                                        const res = await fetch(
+                                            `https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`,
+                                            { headers: { Authorization: `Bearer ${token}` } }
+                                        );
+                                        const blob = await res.blob();
+                                        return new File([blob], doc.name, { type: doc.mimeType });
+                                    })
+                                );
+                                result.push(...batchFiles);
+                            }
+                            onFiles(result);
                         })
                         .build();
 
