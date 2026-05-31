@@ -55,7 +55,6 @@ export default function ImageUploader() {
   const [consentModal, setConsentModal] = useState<PhotoItem | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
-  // Klíč pro vynucení remount SettingsPanel po návratu zpět
   const [settingsKey, setSettingsKey] = useState(0);
 
   const statusLabel: Record<FileStatus, string> = {
@@ -265,17 +264,6 @@ export default function ImageUploader() {
     });
 
     const captured = { ...settings };
-    const groupId = crypto.randomUUID();
-    const batchId = captured.hdr_mode ? undefined : crypto.randomUUID();
-
-    const validItems: PhotoItem[] = validFiles.map(file => ({
-      id: crypto.randomUUID(), file,
-      previewUrl: URL.createObjectURL(file),
-      enhancedUrl: null, status: 'waiting' as FileStatus,
-      progress: 0, error: null,
-      hdr_group_id: captured.hdr_mode ? groupId : undefined,
-      upload_batch_id: batchId,
-    }));
 
     const invalidItems: PhotoItem[] = invalidFiles.map(({ file, reason }) => ({
       id: crypto.randomUUID(), file,
@@ -286,14 +274,63 @@ export default function ImageUploader() {
       upload_batch_id: undefined,
     }));
 
-    setPhotos(prev => [...prev, ...validItems, ...invalidItems]);
-
-    if (validItems.length === 0) return;
+    if (validFiles.length === 0) {
+      setPhotos(prev => [...prev, ...invalidItems]);
+      return;
+    }
 
     if (captured.hdr_mode) {
-      (async () => { await processHdrGroup(validItems, captured); })();
+      // ── HDR režim: rozděl soubory do skupin podle počtu bracketů ──────────
+      // Pokud je hdr_brackets 'auto', všechny soubory jdou do jedné skupiny
+      const bracketsPerGroup = captured.hdr_brackets === 'auto'
+        ? validFiles.length
+        : Number(captured.hdr_brackets);
+
+      const allValidItems: PhotoItem[] = [];
+
+      for (let i = 0; i < validFiles.length; i += bracketsPerGroup) {
+        const groupFiles = validFiles.slice(i, i + bracketsPerGroup);
+        const groupId = crypto.randomUUID(); // každá skupina má vlastní ID
+
+        const groupItems: PhotoItem[] = groupFiles.map(file => ({
+          id: crypto.randomUUID(), file,
+          previewUrl: URL.createObjectURL(file),
+          enhancedUrl: null, status: 'waiting' as FileStatus,
+          progress: 0, error: null,
+          hdr_group_id: groupId,
+          upload_batch_id: undefined,
+        }));
+
+        allValidItems.push(...groupItems);
+
+        // Každou skupinu zpracuj samostatně
+        (async (group: PhotoItem[]) => {
+          await processHdrGroup(group, captured);
+        })(groupItems);
+      }
+
+      setPhotos(prev => [...prev, ...allValidItems, ...invalidItems]);
+
     } else {
-      (async () => { for (const item of validItems) { await processPhoto(item, captured); } })();
+      // ── Normální režim: každá fotka zpracována samostatně ─────────────────
+      const batchId = crypto.randomUUID();
+
+      const validItems: PhotoItem[] = validFiles.map(file => ({
+        id: crypto.randomUUID(), file,
+        previewUrl: URL.createObjectURL(file),
+        enhancedUrl: null, status: 'waiting' as FileStatus,
+        progress: 0, error: null,
+        hdr_group_id: undefined,
+        upload_batch_id: batchId,
+      }));
+
+      setPhotos(prev => [...prev, ...validItems, ...invalidItems]);
+
+      (async () => {
+        for (const item of validItems) {
+          await processPhoto(item, captured);
+        }
+      })();
     }
   }, [settings, processPhoto, processHdrGroup]);
 
@@ -338,7 +375,6 @@ export default function ImageUploader() {
           Nahrajte fotografie
         </h2>
 
-        {/* key vynutí remount po bfcache restore */}
         <SettingsPanel key={settingsKey} settings={settings} onChange={setSettings} disabled={isProcessing} />
 
         <label
