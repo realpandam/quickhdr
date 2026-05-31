@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_URL } from '../lib/config';
 import { supabase } from '../lib/supabase';
 import '../styles/ImageUploader-styles.css';
@@ -35,6 +35,10 @@ const DEFAULT_SETTINGS: Settings = {
   hdr_brackets: 'auto',
 };
 
+// Maximální počet HDR skupin zpracovávaných paralelně.
+// Chrání Railway před zahlcením při velkém počtu skupin (např. 36 skupin při 180 fotkách / 5 bracketech).
+const HDR_GROUP_CONCURRENCY = 3;
+
 const getSessionId = (): string => {
   const key = 'fasthdr_session_id';
   let sessionId = sessionStorage.getItem(key);
@@ -57,6 +61,13 @@ export default function ImageUploader() {
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
   const [settingsKey, setSettingsKey] = useState(0);
 
+  // ── Koordinace multi-group HDR redirect pro nepřihlášené uživatele ────────
+  const hdrSessionRef = useRef<{
+    totalGroups: number;
+    collectedOrderIds: string[];
+    done: number;
+  } | null>(null);
+
   const statusLabel: Record<FileStatus, string> = {
     waiting: 'Čeká', uploading: 'Nahrávám…',
     processing: 'Zpracovávám…', done: 'Hotovo', error: 'Chyba',
@@ -78,7 +89,9 @@ export default function ImageUploader() {
     }
   }, []);
 
-  const isProcessing = photos.some(p => p.status === 'uploading' || p.status === 'processing');
+  const isProcessing = photos.some(
+    p => p.status === 'waiting' || p.status === 'uploading' || p.status === 'processing'
+  );
 
   const updatePhoto = useCallback((id: string, patch: Partial<PhotoItem>) => {
     setPhotos(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
@@ -154,7 +167,11 @@ export default function ImageUploader() {
     }
   }, [updatePhoto, animateProgress]);
 
-  const processHdrGroup = useCallback(async (items: PhotoItem[], currentSettings: Settings) => {
+  const processHdrGroup = useCallback(async (
+    items: PhotoItem[],
+    currentSettings: Settings,
+    onOrderReady?: (order_id: string) => void,
+  ) => {
     items.forEach(item => updatePhoto(item.id, { status: 'uploading', progress: 0 }));
 
     try {
@@ -198,7 +215,10 @@ export default function ImageUploader() {
         }),
       });
 
-      if (!user) { window.location.href = `/order/hdr_pending_${order_id}`; return; }
+      if (!user) {
+        onOrderReady?.(order_id);
+        return;
+      }
 
       items.forEach(it => updatePhoto(it.id, { status: 'processing', progress: 50 }));
 
@@ -221,6 +241,8 @@ export default function ImageUploader() {
       console.error(err);
       const msg = err instanceof Error ? err.message : 'HDR zpracování selhalo';
       items.forEach(it => updatePhoto(it.id, { status: 'error', error: msg, progress: 0 }));
+      // I při chybě oznámit koordinátoru aby se redirect neblokoval
+      onOrderReady?.('');
     }
   }, [updatePhoto]);
 
@@ -248,7 +270,6 @@ export default function ImageUploader() {
     const rawExts = ['.arw', '.cr2', '.cr3', '.crw', '.nef', '.nrw', '.sr2', '.srf', '.raf', '.orf', '.rw2', '.pef', '.kdc', '.erf', '.dng', '.iiq', '.mos', '.mef', '.fff', '.3fr', '.x3f', '.rwl', '.srw'];
 
     const allFiles = Array.from(files);
-
     const validFiles: File[] = [];
     const invalidFiles: { file: File; reason: string }[] = [];
 
@@ -280,45 +301,90 @@ export default function ImageUploader() {
     }
 
     if (captured.hdr_mode) {
-      // ── HDR režim: rozděl soubory do skupin podle počtu bracketů ──────────
-      // Pokud je hdr_brackets 'auto', všechny soubory jdou do jedné skupiny
       const bracketsPerGroup = captured.hdr_brackets === 'auto'
         ? validFiles.length
         : Number(captured.hdr_brackets);
 
+      const allGroups: PhotoItem[][] = [];
       const allValidItems: PhotoItem[] = [];
 
       for (let i = 0; i < validFiles.length; i += bracketsPerGroup) {
         const groupFiles = validFiles.slice(i, i + bracketsPerGroup);
-        const groupId = crypto.randomUUID(); // každá skupina má vlastní ID
+        const groupId = crypto.randomUUID();
 
         const groupItems: PhotoItem[] = groupFiles.map(file => ({
           id: crypto.randomUUID(), file,
           previewUrl: URL.createObjectURL(file),
-          enhancedUrl: null, status: 'waiting' as FileStatus,
+          enhancedUrl: null,
+          status: 'uploading' as FileStatus,
           progress: 0, error: null,
           hdr_group_id: groupId,
           upload_batch_id: undefined,
         }));
 
+        allGroups.push(groupItems);
         allValidItems.push(...groupItems);
-
-        // Každou skupinu zpracuj samostatně
-        (async (group: PhotoItem[]) => {
-          await processHdrGroup(group, captured);
-        })(groupItems);
       }
 
       setPhotos(prev => [...prev, ...allValidItems, ...invalidItems]);
 
+      const totalGroups = allGroups.length;
+
+      if (totalGroups === 1) {
+        // Jedna skupina — přímý redirect
+        processHdrGroup(allGroups[0], captured, (order_id) => {
+          if (order_id) window.location.href = `/order/hdr_pending_${order_id}`;
+        });
+      } else {
+        // Více skupin — koordinátor + omezení konkurence
+        hdrSessionRef.current = {
+          totalGroups,
+          collectedOrderIds: [],
+          done: 0,
+        };
+
+        // ── Omezení konkurence: max HDR_GROUP_CONCURRENCY skupin najednou ──
+        // Zabrání zahlcení Railway při velkém počtu skupin (např. 36 skupin).
+        // Skupiny se zpracovávají ve vlnách po HDR_GROUP_CONCURRENCY.
+        const onOrderReady = (order_id: string) => {
+          const session = hdrSessionRef.current;
+          if (!session) return;
+
+          session.done++;
+          if (order_id) session.collectedOrderIds.push(`hdr_pending_${order_id}`);
+
+          if (session.done === session.totalGroups) {
+            const ids = session.collectedOrderIds;
+            if (ids.length === 0) {
+              // Všechny skupiny selhaly — přesměruj na hlavní stránku s chybou
+              window.location.href = '/?hdr_error=1';
+              return;
+            }
+            const [primary, ...rest] = ids;
+            const url = rest.length > 0
+              ? `${primary}?groups=${rest.join(',')}`
+              : primary;
+            window.location.href = `/order/${url}`;
+          }
+        };
+
+        // Spusť skupiny po dávkách HDR_GROUP_CONCURRENCY
+        (async () => {
+          for (let i = 0; i < allGroups.length; i += HDR_GROUP_CONCURRENCY) {
+            const batch = allGroups.slice(i, i + HDR_GROUP_CONCURRENCY);
+            await Promise.all(batch.map(group => processHdrGroup(group, captured, onOrderReady)));
+          }
+        })();
+      }
+
     } else {
-      // ── Normální režim: každá fotka zpracována samostatně ─────────────────
       const batchId = crypto.randomUUID();
 
       const validItems: PhotoItem[] = validFiles.map(file => ({
         id: crypto.randomUUID(), file,
         previewUrl: URL.createObjectURL(file),
-        enhancedUrl: null, status: 'waiting' as FileStatus,
+        enhancedUrl: null,
+        status: 'uploading' as FileStatus,
         progress: 0, error: null,
         hdr_group_id: undefined,
         upload_batch_id: batchId,
@@ -350,6 +416,7 @@ export default function ImageUploader() {
   const handleReset = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
     setPhotos([]);
+    hdrSessionRef.current = null;
   };
 
   const saveConsent = async () => {

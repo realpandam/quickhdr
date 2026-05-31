@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
 export default function ResetPasswordPage() {
@@ -12,14 +13,14 @@ export default function ResetPasswordPage() {
 
     useEffect(() => {
         // Zpracuj token z URL hash (#access_token=...&type=recovery)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
             if (event === 'PASSWORD_RECOVERY') {
                 setReady(true);
             }
         });
 
         // Supabase automaticky detekuje token v URL hash
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
             if (session) setReady(true);
         });
 

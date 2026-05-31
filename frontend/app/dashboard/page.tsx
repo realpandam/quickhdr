@@ -43,6 +43,10 @@ const SEARCH_PLACEHOLDERS = [
   'Název souboru…',
 ];
 
+// ── Guard: hdr_pending image_id nemá ještě finální URL od Autoenhance ────────
+// Tyto ordery se zobrazí v UI, ale bez náhledu (ikona místo obrázku).
+const isHdrPending = (image_id: string) => image_id?.startsWith('hdr_pending_');
+
 function groupOrders(orders: Order[]): BatchGroup[] {
   const map = new Map<string, Order[]>();
   for (const order of orders) {
@@ -54,7 +58,6 @@ function groupOrders(orders: Order[]): BatchGroup[] {
     const sorted = [...orders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     const firstName = sorted[0]?.filename ?? '';
     const baseName = firstName.replace(/\.[^.]+$/, '');
-    // Prefer custom batch_name if set
     const customName = sorted[0]?.batch_name;
     const name = customName || (orders.length > 1 ? `${baseName} + ${orders.length - 1} dalších` : firstName || 'Bez názvu');
     const isExpired = sorted.every(o => new Date(o.expires_at) < new Date());
@@ -76,7 +79,6 @@ export default function DashboardPage() {
   const [openBatches, setOpenBatches] = useState<Set<string>>(new Set());
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [checkoutLoading, setCheckoutLoading] = useState(false);
-  // Rename state: batchId -> current editing value
   const [editingBatch, setEditingBatch] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -127,7 +129,6 @@ export default function DashboardPage() {
     init();
   }, []);
 
-  // Focus input when editing starts
   useEffect(() => {
     if (editingBatch && renameInputRef.current) {
       renameInputRef.current.focus();
@@ -135,7 +136,6 @@ export default function DashboardPage() {
     }
   }, [editingBatch]);
 
-  // Lightbox keyboard navigation
   useEffect(() => {
     if (!lightbox) return;
     const handler = (e: KeyboardEvent) => {
@@ -147,7 +147,11 @@ export default function DashboardPage() {
     return () => window.removeEventListener('keydown', handler);
   }, [lightbox]);
 
-  const openLightbox = (orders: Order[], index: number) => setLightbox({ orders, index });
+  const openLightbox = (orders: Order[], index: number) => {
+    // Nepouštět lightbox pro hdr_pending — nemá co zobrazit
+    if (isHdrPending(orders[index]?.image_id)) return;
+    setLightbox({ orders, index });
+  };
 
   const toggleBatch = (batchId: string) => {
     setOpenBatches(prev => {
@@ -190,15 +194,11 @@ export default function DashboardPage() {
     const newName = editingValue.trim();
     setEditingBatch(null);
     if (!newName || newName === group.name) return;
-
-    // Update all orders in this batch
     const imageIds = group.orders.map(o => o.id);
     await supabase.from('orders')
       .update({ batch_name: newName })
       .in('id', imageIds)
       .eq('user_id', user!.id);
-
-    // Update local state
     setOrders(prev => prev.map(o =>
       imageIds.includes(o.id) ? { ...o, batch_name: newName } : o
     ));
@@ -540,7 +540,7 @@ export default function DashboardPage() {
                         {batchExpired ? '⏰' : isSingle ? '🖼️' : '📁'}
                       </div>
 
-                      {/* Name — inline editable */}
+                      {/* Name */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         {isEditing ? (
                           <input
@@ -650,6 +650,8 @@ export default function DashboardPage() {
                             const isPaid = order.payment_status === 'paid';
                             const countdown = getCountdown(order.expires_at);
                             const isSelected = selectedOrders.has(order.id);
+                            // ── Guard: hdr_pending nemá ještě finální image_id ──
+                            const pending = isHdrPending(order.image_id);
 
                             return (
                               <div key={order.id} style={{
@@ -675,25 +677,42 @@ export default function DashboardPage() {
                                   </div>
                                 )}
 
+                                {/* ── Thumbnail: hdr_pending zobrazí placeholder místo broken image ── */}
                                 <div
-                                  onClick={() => openLightbox(group.orders, oIdx)}
+                                  onClick={() => !pending && openLightbox(group.orders, oIdx)}
                                   style={{
                                     position: 'relative' as const, width: '100%', paddingBottom: '75%',
-                                    background: 'var(--bg-secondary)', cursor: 'zoom-in',
+                                    background: 'var(--bg-secondary)',
+                                    cursor: pending ? 'default' : 'zoom-in',
                                     overflow: 'hidden', borderRadius: 7, marginBottom: 8,
                                     outline: isSelected ? '2px solid #7B5CF0' : 'none',
                                     outlineOffset: '-2px', transition: 'outline 0.15s ease',
                                   }}
                                 >
-                                  <img
-                                    src={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=60`}
-                                    alt={order.filename}
-                                    style={{ position: 'absolute' as const, inset: 0, width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s ease' }}
-                                    onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.05)'; }}
-                                    onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
-                                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                  />
-                                  {isPaid && !expired && (
+                                  {pending ? (
+                                    // Placeholder pro HDR ordery kde ještě nepřišel webhook
+                                    <div style={{
+                                      position: 'absolute' as const, inset: 0,
+                                      display: 'flex', flexDirection: 'column' as const,
+                                      alignItems: 'center', justifyContent: 'center',
+                                      gap: 6,
+                                    }}>
+                                      <span style={{ fontSize: 24, opacity: 0.4 }}>⏳</span>
+                                      <span style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' as const, padding: '0 8px', lineHeight: 1.4 }}>
+                                        HDR se zpracovává
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <img
+                                      src={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=60`}
+                                      alt={order.filename}
+                                      style={{ position: 'absolute' as const, inset: 0, width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s ease' }}
+                                      onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.05)'; }}
+                                      onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
+                                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                    />
+                                  )}
+                                  {isPaid && !expired && !pending && (
                                     <div style={{ position: 'absolute' as const, top: 5, right: 5, background: 'rgba(74,222,128,0.9)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, color: '#052e16' }}>✓</div>
                                   )}
                                 </div>
@@ -709,7 +728,7 @@ export default function DashboardPage() {
                                 )}
 
                                 <div style={{ display: 'flex', gap: 5 }}>
-                                  {isPaid && !expired ? (
+                                  {isPaid && !expired && !pending ? (
                                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                                       <a
                                         href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
@@ -718,7 +737,6 @@ export default function DashboardPage() {
                                       >
                                         Stáhnout
                                       </a>
-                                      {/* 🔔 NOVÉ: Tlačítko faktury */}
                                       {order.uol_invoice_id && (
                                         <a
                                           href={`${API_URL}/api/billing/invoice/${order.image_id}`}
@@ -742,6 +760,11 @@ export default function DashboardPage() {
                                         </a>
                                       )}
                                     </div>
+                                  ) : pending ? (
+                                    // hdr_pending — zobraz jen info, žádné akce
+                                    <span style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                                      Čeká na dokončení zpracování
+                                    </span>
                                   ) : !expired ? (
                                     <button onClick={() => handleBuy(order)} style={{ flex: 1, padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }}>
                                       Koupit
@@ -801,7 +824,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Lightbox */}
+      {/* Lightbox — hdr_pending zde nemůže nastat (openLightbox ho blokuje) */}
       {lightbox && currentLightboxOrder && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.96)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(10px)', animation: 'fadeIn 0.2s ease' }}
