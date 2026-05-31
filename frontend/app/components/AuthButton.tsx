@@ -1,6 +1,6 @@
 'use client';
 
-import type { User } from '@supabase/supabase-js';
+import type { AuthChangeEvent, Session, User, UserResponse } from '@supabase/supabase-js';
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -16,12 +16,12 @@ export default function AuthButton() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(({ data }: UserResponse) => {
       setUser(data.user);
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       setUser(session?.user ?? null);
     });
 

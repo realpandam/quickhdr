@@ -1,5 +1,6 @@
 'use client';
 
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -51,7 +52,7 @@ export default function SessionTimeout() {
 
     init();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       setShowWarning(false);
       clearTimeout(warningTimeout);
       clearInterval(countdownInterval);
