@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { API_URL } from '../../lib/config';
 
 type Status = 'loading' | 'processing' | 'done' | 'error';
@@ -44,6 +44,117 @@ interface GroupState {
   isHdrPending: boolean;
 }
 
+// ── Skeleton shimmer pro načítající se foto ───────────────────────────────────
+function PhotoSkeleton() {
+  return (
+    <div style={{
+      width: '100%', paddingBottom: '66%', position: 'relative',
+      borderRadius: 12, overflow: 'hidden', background: 'var(--bg-secondary)',
+    }}>
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'linear-gradient(90deg, var(--bg-secondary) 25%, var(--bg-card, #1a1a2e) 50%, var(--bg-secondary) 75%)',
+        backgroundSize: '200% 100%',
+        animation: 'shimmer 1.5s infinite',
+      }} />
+      <style>{`@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }`}</style>
+    </div>
+  );
+}
+
+// ── Foto s loaderem ───────────────────────────────────────────────────────────
+function PhotoWithLoader({ src, alt, onClick, isSelected, showOverlay, price }: {
+  src: string; alt: string; onClick: () => void;
+  isSelected: boolean; showOverlay: boolean; price: number;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        position: 'relative', borderRadius: 12, overflow: 'hidden',
+        border: isSelected ? '2px solid #7B5CF0' : '1px solid var(--border)',
+        cursor: 'pointer',
+        transition: 'border-color 0.15s ease',
+      }}
+    >
+      {/* Skeleton dokud se foto nenačte */}
+      {!loaded && !error && <PhotoSkeleton />}
+
+      <img
+        src={src}
+        alt={alt}
+        onLoad={() => setLoaded(true)}
+        onError={() => { setLoaded(true); setError(true); }}
+        style={{
+          width: '100%', display: loaded ? 'block' : 'none',
+          transition: 'transform 0.4s ease',
+        }}
+        onMouseEnter={e => { if (!showOverlay) (e.currentTarget as HTMLImageElement).style.transform = 'scale(1.03)'; }}
+        onMouseLeave={e => (e.currentTarget as HTMLImageElement).style.transform = 'scale(1)'}
+      />
+
+      {/* Checkmark v levém horním rohu */}
+      {loaded && showOverlay && (
+        <div style={{
+          position: 'absolute', top: 10, left: 10,
+          width: 26, height: 26, borderRadius: 6,
+          background: isSelected ? '#7B5CF0' : 'rgba(0,0,0,0.45)',
+          border: isSelected ? 'none' : '2px solid rgba(255,255,255,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'all 0.15s ease',
+          backdropFilter: 'blur(4px)',
+        }}>
+          {isSelected && <span style={{ color: '#fff', fontSize: 14, lineHeight: 1 }}>✓</span>}
+        </div>
+      )}
+
+      {/* Lupa badge vpravo nahoře — pouze když NENÍ v selection módu */}
+      {loaded && !showOverlay && (
+        <div style={{
+          position: 'absolute', top: 12, right: 12,
+          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8,
+          padding: '6px 10px', display: 'flex', alignItems: 'center',
+          gap: 5, fontSize: 12, color: '#fff', fontWeight: 500,
+          pointerEvents: 'none',
+        }}>
+          <span style={{ fontSize: 14 }}>🔍</span> Klikněte pro přiblížení
+        </div>
+      )}
+
+      {/* Spodní overlay — výběr/cena v multi módu, nebo jen info v single módu */}
+      {loaded && (
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          background: isSelected
+            ? 'rgba(123,92,240,0.85)'
+            : 'linear-gradient(transparent, rgba(0,0,0,0.7))',
+          padding: showOverlay ? '10px 14px' : '2rem 1rem 1rem',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          transition: 'background 0.2s ease',
+        }}>
+          {showOverlay ? (
+            <>
+              <span style={{ fontSize: 13, color: '#fff', fontWeight: isSelected ? 600 : 400, opacity: isSelected ? 1 : 0.7 }}>
+                {isSelected ? 'Vybráno ke koupi' : 'Klikněte pro výběr'}
+              </span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>{price} Kč</span>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>Náhled s vodoznakem</span>
+              <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>{price} Kč</span>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrderPageInner() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -54,9 +165,6 @@ function OrderPageInner() {
     primaryId,
     ...(groupsParam ? groupsParam.split(',').filter(Boolean) : []),
   ];
-
-  const isMultiGroup = allGroupIds.length > 1;
-  const isHdrFlow = allGroupIds.some(id => id.startsWith('hdr_pending_'));
 
   const [groups, setGroups] = useState<GroupState[]>(() =>
     allGroupIds.map(id => ({
@@ -72,6 +180,7 @@ function OrderPageInner() {
   const [activeIdx, setActiveIdx] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lightbox, setLightbox] = useState(false);
+  const prefetchedRef = useRef<Set<string>>(new Set());
 
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -89,12 +198,26 @@ function OrderPageInner() {
   const [icoError, setIcoError] = useState('');
   const [aresLoading, setAresLoading] = useState(false);
   const [aresStatus, setAresStatus] = useState<'idle' | 'ok' | 'notfound'>('idle');
-
   const [buyLoading, setBuyLoading] = useState(false);
 
   const updateGroup = (groupId: string, patch: Partial<GroupState>) => {
     setGroups(prev => prev.map(g => g.groupId === groupId ? { ...g, ...patch } : g));
   };
+
+  // ── Prefetch sousedních fotek ─────────────────────────────────────────────
+  useEffect(() => {
+    const toPrefetch = [activeIdx - 1, activeIdx, activeIdx + 1, activeIdx + 2]
+      .filter(i => i >= 0 && i < groups.length)
+      .map(i => groups[i])
+      .filter(g => g?.enhancedUrl && !prefetchedRef.current.has(g.groupId));
+
+    toPrefetch.forEach(g => {
+      if (!g.enhancedUrl) return;
+      const img = new Image();
+      img.src = g.enhancedUrl;
+      prefetchedRef.current.add(g.groupId);
+    });
+  }, [activeIdx, groups]);
 
   // ── Polling pro každou skupinu ────────────────────────────────────────────
   useEffect(() => {
@@ -123,7 +246,6 @@ function OrderPageInner() {
               clearInterval(progressInterval);
 
               if (image_ids.length === 1) {
-                // Jeden výsledek — jednoduchý update existující skupiny
                 const finalImageId = image_ids[0];
                 setGroups(prev => prev.map(g =>
                   g.groupId === group.groupId
@@ -133,17 +255,11 @@ function OrderPageInner() {
                     : g
                 ));
               } else {
-                // Více výsledků (auto groupování Autoenhance) —
-                // nahraď pending skupinu všemi výsledky jako samostatné skupiny v carouselu
                 const newGroups: GroupState[] = image_ids.map((id: string) => ({
-                  groupId: id,
-                  orderId: id,
-                  status: 'done' as Status,
+                  groupId: id, orderId: id, status: 'done' as Status,
                   enhancedUrl: `${API_URL}/api/enhance/enhanced/${id}`,
-                  progress: 100,
-                  isHdrPending: false,
+                  progress: 100, isHdrPending: false,
                 }));
-
                 setGroups(prev => [
                   ...prev.filter(g => g.groupId !== group.groupId),
                   ...newGroups,
@@ -227,14 +343,13 @@ function OrderPageInner() {
 
   // ── Klávesnice carousel ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!isMultiGroup) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') setActiveIdx(i => Math.max(0, i - 1));
       if (e.key === 'ArrowRight') setActiveIdx(i => Math.min(groups.length - 1, i + 1));
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isMultiGroup, groups.length]);
+  }, [groups.length]);
 
   // ── Auto-select hotových skupin ───────────────────────────────────────────
   useEffect(() => {
@@ -253,13 +368,11 @@ function OrderPageInner() {
     const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     if (!emailValid) { setEmailError('Zadejte prosím platný email'); return; }
     setEmailError('');
-
     if (!agreedToTerms || !agreedToPrivacy) {
       setConsentError('Pro dokončení objednávky je nutné odsouhlasit oba body níže.');
       return;
     }
     setConsentError('');
-
     if (wantsInvoice && billingIco && !isValidIco(billingIco)) {
       setIcoError('Neplatné IČO — zkontrolujte prosím zadané číslo');
       return;
@@ -318,9 +431,6 @@ function OrderPageInner() {
   const selectedDoneGroups = groups.filter(g => selected.has(g.groupId) && g.status === 'done');
   const totalPrice = selectedDoneGroups.length * PRICE_CZK;
   const canBuy = selectedDoneGroups.length > 0 && agreedToTerms && agreedToPrivacy;
-
-  // isMultiGroup je počítáno dynamicky z aktuálního groups state
-  // (může se změnit když auto HDR vrátí více výsledků)
   const currentlyMultiGroup = groups.length > 1;
 
   const toggleSelect = (groupId: string) => {
@@ -361,21 +471,17 @@ function OrderPageInner() {
 
       <div style={{ maxWidth: 580, width: '100%', textAlign: 'center' }}>
 
-        {/* ── Error state — všechny skupiny selhaly ── */}
         {allFailed ? (
           <>
             <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 1.5rem' }}>✗</div>
             <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Zpracování selhalo</h2>
             <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: '2rem', lineHeight: 1.6 }}>
-              {currentlyMultiGroup
-                ? 'Bohužel se nepodařilo zpracovat žádnou z HDR skupin.'
-                : 'Omlouváme se, došlo k chybě při zpracování fotografie.'}<br />
+              {currentlyMultiGroup ? 'Bohužel se nepodařilo zpracovat žádnou z HDR skupin.' : 'Omlouváme se, došlo k chybě při zpracování fotografie.'}<br />
               Zkuste to prosím znovu nebo nás kontaktujte na{' '}
               <a href="mailto:info@fasthdr.cz" style={{ color: 'var(--accent)' }}>info@fasthdr.cz</a>.
             </p>
             <a href="/" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14 }}>Zkusit znovu</a>
           </>
-
         ) : (
           <>
             {/* ── Hlavička ── */}
@@ -411,6 +517,7 @@ function OrderPageInner() {
             {anyDone && (
               <div style={{ marginBottom: '1.5rem' }}>
 
+                {/* ── Navigace — POUZE nahoře, bez chevronů přes obrázek ── */}
                 {currentlyMultiGroup && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
                     <button
@@ -418,27 +525,9 @@ function OrderPageInner() {
                       disabled={activeIdx === 0}
                       style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', cursor: activeIdx === 0 ? 'not-allowed' : 'pointer', opacity: activeIdx === 0 ? 0.3 : 1, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >‹</button>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {activeGroup?.status === 'done' && (
-                        <div
-                          onClick={() => toggleSelect(activeGroup.groupId)}
-                          style={{
-                            width: 20, height: 20, borderRadius: 5, flexShrink: 0,
-                            border: `2px solid ${selected.has(activeGroup.groupId) ? 'var(--accent)' : 'var(--border)'}`,
-                            background: selected.has(activeGroup.groupId) ? 'var(--accent)' : 'transparent',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: 'pointer', transition: 'all 0.15s ease',
-                          }}
-                        >
-                          {selected.has(activeGroup.groupId) && <span style={{ color: '#000', fontSize: 12, lineHeight: 1 }}>✓</span>}
-                        </div>
-                      )}
-                      <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>
-                        Skupina {activeIdx + 1} / {groups.length}
-                      </span>
-                    </div>
-
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>
+                      Skupina {activeIdx + 1} / {groups.length}
+                    </span>
                     <button
                       onClick={() => setActiveIdx(i => Math.min(groups.length - 1, i + 1))}
                       disabled={activeIdx === groups.length - 1}
@@ -447,36 +536,24 @@ function OrderPageInner() {
                   </div>
                 )}
 
+                {/* ── Foto s varianta C výběrem ── */}
                 {activeGroup?.status === 'done' && activeGroup.enhancedUrl ? (
-                  <div
-                    onClick={() => setLightbox(true)}
-                    style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)', cursor: 'zoom-in' }}
-                  >
-                    <img
-                      src={activeGroup.enhancedUrl}
-                      alt="Upravená fotografie"
-                      style={{ width: '100%', display: 'block', transition: 'transform 0.4s ease' }}
-                      onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.03)')}
-                      onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
-                    />
-                    {currentlyMultiGroup && activeIdx > 0 && (
-                      <button onClick={e => { e.stopPropagation(); setActiveIdx(i => i - 1); }}
-                        style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', width: 40, height: 40, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)' }}
-                      >‹</button>
-                    )}
-                    {currentlyMultiGroup && activeIdx < groups.length - 1 && (
-                      <button onClick={e => { e.stopPropagation(); setActiveIdx(i => i + 1); }}
-                        style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', width: 40, height: 40, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)' }}
-                      >›</button>
-                    )}
-                    <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#fff', fontWeight: 500, pointerEvents: 'none' }}>
-                      <span style={{ fontSize: 14 }}>🔍</span> Klikněte pro přiblížení
-                    </div>
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', padding: '2rem 1rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>Náhled s vodoznakem</span>
-                      <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>{PRICE_CZK} Kč</span>
-                    </div>
-                  </div>
+                  <PhotoWithLoader
+                    src={activeGroup.enhancedUrl}
+                    alt="Upravená fotografie"
+                    isSelected={selected.has(activeGroup.groupId)}
+                    showOverlay={currentlyMultiGroup}
+                    price={PRICE_CZK}
+                    onClick={() => {
+                      if (currentlyMultiGroup) {
+                        // Klik na foto = výběr/zrušení (varianta C)
+                        toggleSelect(activeGroup.groupId);
+                      } else {
+                        // Single foto — klik = lightbox
+                        setLightbox(true);
+                      }
+                    }}
+                  />
                 ) : activeGroup?.status === 'processing' || activeGroup?.status === 'loading' ? (
                   <div style={{ borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg-secondary)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                     <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
@@ -556,7 +633,7 @@ function OrderPageInner() {
                       </div>
                     ) : (
                       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>
-                        Vyberte fotografie které chcete zakoupit
+                        Klikněte na fotografie které chcete zakoupit
                       </p>
                     )}
                   </div>
@@ -675,28 +752,14 @@ function OrderPageInner() {
         )}
       </div>
 
-      {/* Lightbox */}
+      {/* Lightbox — pouze pro single foto */}
       {lightbox && activeGroup?.enhancedUrl && (
         <div onClick={() => setLightbox(false)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(12px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out', animation: 'fadeIn 0.2s ease' }}>
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(rgba(0,0,0,0.6), transparent)' }}>
-            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: 500 }}>
-              {currentlyMultiGroup ? `Skupina ${activeIdx + 1} / ${groups.length} — náhled s vodoznakem` : 'Náhled s vodoznakem'}
-            </span>
+            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: 500 }}>Náhled s vodoznakem</span>
             <button onClick={() => setLightbox(false)} style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
           </div>
           <img src={activeGroup.enhancedUrl} alt="Náhled" onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '82vh', objectFit: 'contain', borderRadius: 8, boxShadow: '0 30px 80px rgba(0,0,0,0.6)', animation: 'zoomIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)', cursor: 'default' }} />
-          {currentlyMultiGroup && (
-            <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '16px 20px', background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', display: 'flex', justifyContent: 'center', gap: 8 }}>
-              <button onClick={e => { e.stopPropagation(); setActiveIdx(i => Math.max(0, i - 1)); }} disabled={activeIdx === 0}
-                style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', cursor: activeIdx === 0 ? 'not-allowed' : 'pointer', opacity: activeIdx === 0 ? 0.4 : 1, fontSize: 14 }}>
-                ‹ Předchozí
-              </button>
-              <button onClick={e => { e.stopPropagation(); setActiveIdx(i => Math.min(groups.length - 1, i + 1)); }} disabled={activeIdx === groups.length - 1}
-                style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', cursor: activeIdx === groups.length - 1 ? 'not-allowed' : 'pointer', opacity: activeIdx === groups.length - 1 ? 0.4 : 1, fontSize: 14 }}>
-                Další ›
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -709,7 +772,6 @@ function OrderPageInner() {
   );
 }
 
-// ── Suspense wrapper — vyžadován Next.js pro useSearchParams() ────────────────
 export default function OrderPage() {
   return (
     <Suspense fallback={

@@ -35,8 +35,6 @@ const DEFAULT_SETTINGS: Settings = {
   hdr_brackets: 'auto',
 };
 
-// Maximální počet HDR skupin zpracovávaných paralelně.
-// Chrání Railway před zahlcením při velkém počtu skupin (např. 36 skupin při 180 fotkách / 5 bracketech).
 const HDR_GROUP_CONCURRENCY = 3;
 
 const getSessionId = (): string => {
@@ -60,8 +58,8 @@ export default function ImageUploader() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
   const [settingsKey, setSettingsKey] = useState(0);
+  const [hdrUploadProgress, setHdrUploadProgress] = useState<{ done: number; total: number } | null>(null);
 
-  // ── Koordinace multi-group HDR redirect pro nepřihlášené uživatele ────────
   const hdrSessionRef = useRef<{
     totalGroups: number;
     collectedOrderIds: string[];
@@ -186,10 +184,14 @@ export default function ImageUploader() {
       if (!orderRes.ok) throw new Error('Nepodařilo se vytvořit order');
       const { order_id } = await orderRes.json();
 
+      setHdrUploadProgress(prev => ({
+        done: prev?.done ?? 0,
+        total: (prev?.total ?? 0) + items.length,
+      }));
+
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
 
-        // Retry 2× při selhání — zabrání pádu při dočasném výpadku sítě
         let uploadRes: Response | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
           const formData = new FormData();
@@ -209,6 +211,8 @@ export default function ImageUploader() {
           throw new Error(errMsg);
         }
 
+        setHdrUploadProgress(prev => prev ? { ...prev, done: prev.done + 1 } : null);
+
         const progress = Math.round(((i + 1) / items.length) * 40);
         items.forEach(it => updatePhoto(it.id, { progress }));
       }
@@ -222,33 +226,21 @@ export default function ImageUploader() {
         }),
       });
 
+      // ── Nepřihlášený uživatel — redirect na order page ────────────────────
       if (!user) {
         onOrderReady?.(order_id);
         return;
       }
 
+      // ── Přihlášený uživatel — webhook + email, uživatel může odejít ───────
+      // Nepollujeme — DB a email obstarává webhook handler na Railway.
+      // Uživatel najde výsledky v dashboardu.
       items.forEach(it => updatePhoto(it.id, { status: 'processing', progress: 50 }));
-
-      const pollFallback = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_URL}/api/enhance/hdr/order/${order_id}/status`);
-          const { is_merging, is_processing, image_ids } = await res.json();
-          const done = !is_merging && !is_processing && image_ids?.length > 0;
-          if (done) {
-            clearInterval(pollFallback);
-            updatePhoto(items[0].id, { status: 'done', progress: 100, enhancedUrl: `${API_URL}/api/enhance/enhanced/${image_ids[0]}` });
-            items.slice(1).forEach(it => updatePhoto(it.id, { status: 'done', progress: 100, enhancedUrl: null }));
-          }
-        } catch { clearInterval(pollFallback); }
-      }, 3000);
-
-      setTimeout(() => clearInterval(pollFallback), 10 * 60 * 1000);
 
     } catch (err) {
       console.error(err);
       const msg = err instanceof Error ? err.message : 'HDR zpracování selhalo';
       items.forEach(it => updatePhoto(it.id, { status: 'error', error: msg, progress: 0 }));
-      // I při chybě oznámit koordinátoru aby se redirect neblokoval
       onOrderReady?.('');
     }
   }, [updatePhoto]);
@@ -334,48 +326,31 @@ export default function ImageUploader() {
       }
 
       setPhotos(prev => [...prev, ...allValidItems, ...invalidItems]);
+      setHdrUploadProgress({ done: 0, total: 0 });
 
       const totalGroups = allGroups.length;
 
       if (totalGroups === 1) {
-        // Jedna skupina — přímý redirect
         processHdrGroup(allGroups[0], captured, (order_id) => {
           if (order_id) window.location.href = `/order/hdr_pending_${order_id}`;
         });
       } else {
-        // Více skupin — koordinátor + omezení konkurence
-        hdrSessionRef.current = {
-          totalGroups,
-          collectedOrderIds: [],
-          done: 0,
-        };
+        hdrSessionRef.current = { totalGroups, collectedOrderIds: [], done: 0 };
 
-        // ── Omezení konkurence: max HDR_GROUP_CONCURRENCY skupin najednou ──
-        // Zabrání zahlcení Railway při velkém počtu skupin (např. 36 skupin).
-        // Skupiny se zpracovávají ve vlnách po HDR_GROUP_CONCURRENCY.
         const onOrderReady = (order_id: string) => {
           const session = hdrSessionRef.current;
           if (!session) return;
-
           session.done++;
           if (order_id) session.collectedOrderIds.push(`hdr_pending_${order_id}`);
-
           if (session.done === session.totalGroups) {
             const ids = session.collectedOrderIds;
-            if (ids.length === 0) {
-              // Všechny skupiny selhaly — přesměruj na hlavní stránku s chybou
-              window.location.href = '/?hdr_error=1';
-              return;
-            }
+            if (ids.length === 0) { window.location.href = '/?hdr_error=1'; return; }
             const [primary, ...rest] = ids;
-            const url = rest.length > 0
-              ? `${primary}?groups=${rest.join(',')}`
-              : primary;
+            const url = rest.length > 0 ? `${primary}?groups=${rest.join(',')}` : primary;
             window.location.href = `/order/${url}`;
           }
         };
 
-        // Spusť skupiny po dávkách HDR_GROUP_CONCURRENCY
         (async () => {
           for (let i = 0; i < allGroups.length; i += HDR_GROUP_CONCURRENCY) {
             const batch = allGroups.slice(i, i + HDR_GROUP_CONCURRENCY);
@@ -423,6 +398,7 @@ export default function ImageUploader() {
   const handleReset = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
     setPhotos([]);
+    setHdrUploadProgress(null);
     hdrSessionRef.current = null;
   };
 
@@ -441,6 +417,11 @@ export default function ImageUploader() {
     const { data } = await supabase.from('user_consents').select('agreed_to_terms_at').eq('user_id', user.id).single();
     return !!data?.agreed_to_terms_at;
   };
+
+  const hdrPct = hdrUploadProgress && hdrUploadProgress.total > 0
+    ? Math.round((hdrUploadProgress.done / hdrUploadProgress.total) * 100)
+    : 0;
+  const showHdrProgress = hdrUploadProgress !== null && hdrUploadProgress.total > 0 && hdrPct < 100;
 
   return (
     <section id="editor" className="uploader-section" style={{ maxWidth: 1100, margin: '0 auto', padding: '5rem 2rem 2rem' }}>
@@ -475,6 +456,21 @@ export default function ImageUploader() {
         <div>
           <CloudPicker onFiles={(files) => { if (!isProcessing) addFiles(files); }} />
         </div>
+
+        {showHdrProgress && (
+          <div style={{ margin: '1rem 0', padding: '1rem 1.25rem', background: 'var(--bg-card)', border: '1px solid var(--accent-glow)', borderRadius: 'var(--radius)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Nahrávám HDR brackety…</span>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                {hdrUploadProgress!.done} / {hdrUploadProgress!.total} souborů · {hdrPct}%
+              </span>
+            </div>
+            <div style={{ height: 6, background: 'var(--progress-bg)', borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${hdrPct}%`, background: 'linear-gradient(90deg, #6B47DC, #A78BFA)', borderRadius: 999, transition: 'width 0.3s ease', boxShadow: '0 0 8px rgba(139,92,246,0.5)' }} />
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Nezavírejte tuto stránku — upload probíhá na pozadí</span>
+          </div>
+        )}
 
         {photos.length > 0 && (
           <>
@@ -537,7 +533,13 @@ export default function ImageUploader() {
                             </button>
                           </div>
                         ) : photo.status === 'processing' ? (
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pošleme email až bude hotovo</span>
+                          // ── Přihlášený uživatel: HDR zpracovává webhook, odkazujeme na dashboard ──
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                            Pošleme email až bude hotovo —{' '}
+                            <a href="/dashboard" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
+                              dashboard
+                            </a>
+                          </span>
                         ) : photo.status === 'done' && photo.hdr_group_id ? (
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sloučeno do HDR</span>
                         ) : (
