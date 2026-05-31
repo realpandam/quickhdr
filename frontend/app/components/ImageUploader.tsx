@@ -188,15 +188,22 @@ export default function ImageUploader() {
 
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        const formData = new FormData();
-        formData.append('image', item.file);
-        formData.append('order_id', order_id);
-        formData.append('settings', JSON.stringify(currentSettings));
-        const uploadRes = await fetch(`${API_URL}/api/enhance/upload-bracket`, { method: 'POST', body: formData });
 
-        if (!uploadRes.ok) {
-          const errData = await uploadRes.json().catch(() => ({}));
-          const errMsg = uploadRes.status === 415
+        // Retry 2× při selhání — zabrání pádu při dočasném výpadku sítě
+        let uploadRes: Response | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const formData = new FormData();
+          formData.append('image', item.file);
+          formData.append('order_id', order_id);
+          formData.append('settings', JSON.stringify(currentSettings));
+          uploadRes = await fetch(`${API_URL}/api/enhance/upload-bracket`, { method: 'POST', body: formData });
+          if (uploadRes.ok) break;
+          if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+
+        if (!uploadRes || !uploadRes.ok) {
+          const errData = await uploadRes?.json().catch(() => ({})) ?? {};
+          const errMsg = uploadRes?.status === 415
             ? (errData.error ?? 'Nepodporovaný formát souboru.')
             : `Upload bracketu ${item.file.name} selhal`;
           throw new Error(errMsg);

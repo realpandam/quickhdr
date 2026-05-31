@@ -14,6 +14,7 @@ interface Order {
   payment_status: string;
   created_at: string;
   expires_at: string;
+  hdr_order_id: string | null;
   upload_batch_id: string | null;
   batch_name: string | null;
   uol_invoice_id: string | null;
@@ -50,7 +51,9 @@ const isHdrPending = (image_id: string) => image_id?.startsWith('hdr_pending_');
 function groupOrders(orders: Order[]): BatchGroup[] {
   const map = new Map<string, Order[]>();
   for (const order of orders) {
-    const key = order.upload_batch_id ?? `single_${order.id}`;
+    // HDR výsledky (stejný hdr_order_id) → jedna skupina v dashboardu
+    const key = order.upload_batch_id
+      ?? (order.hdr_order_id ? `hdr_${order.hdr_order_id}` : `single_${order.id}`);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(order);
   }

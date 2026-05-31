@@ -366,32 +366,108 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
     if (event !== 'image_processed' || error) return;
 
     let order = null;
+
+    // 1. Zkus najít přímý order podle image_id (non-HDR flow)
     const { data: directOrder } = await supabase.from('orders').select('*').eq('image_id', image_id).single();
     if (directOrder) order = directOrder;
 
+    // 2. HDR flow — order_id odkazuje na hdr_order_id
     if (!order && order_id && !order_is_processing) {
       const { data: hdrOrder } = await supabase.from('orders').select('*').eq('hdr_order_id', order_id).single();
+
       if (hdrOrder) {
-        await supabase.from('orders').update({ image_id }).eq('hdr_order_id', order_id);
-        order = { ...hdrOrder, image_id };
+        if (hdrOrder.image_id === `hdr_pending_${order_id}`) {
+          // ── První výsledek: aktualizuj existující řádek ───────────────────
+          await supabase.from('orders').update({ image_id }).eq('hdr_order_id', order_id);
+          order = { ...hdrOrder, image_id };
+        } else {
+          // ── Další výsledky: zkontroluj jestli tento image_id už existuje ──
+          const { data: existingResult } = await supabase
+            .from('orders')
+            .select('id')
+            .eq('image_id', image_id) 
+            .single();
+
+          if (!existingResult) {
+            // Vytvoř nový řádek pro každý další výsledek HDR orderu
+            await supabase.from('orders').insert({
+              image_id,
+              filename: hdrOrder.filename,
+              payment_status: 'pending',
+              amount_czk: PRICE_CZK,
+              user_id: hdrOrder.user_id,
+              session_id: hdrOrder.session_id,
+              hdr_order_id: order_id,
+              payment_session_id: `pending_${image_id}`,
+              upload_batch_id: hdrOrder.upload_batch_id,
+            });
+          }
+
+          order = { ...hdrOrder, image_id };
+        }
       }
     }
 
     if (!order) return;
 
-    if (order.upload_batch_id) {
-      const { data: batchOrders } = await supabase.from('orders').select('image_id').eq('upload_batch_id', order.upload_batch_id);
-      if (batchOrders && batchOrders.length > 1) {
-        const statuses = await Promise.allSettled(
-          batchOrders.map(async (o) => {
-            const r = await axios.get(`${API_BASE}/v3/images/${o.image_id}`, { headers: { 'x-api-key': API_KEY } });
-            return r.data.status as string;
-          })
-        );
-        const allDone = statuses.every((s) => s.status === 'fulfilled' && ['processed', 'failed', 'error'].includes(s.value));
-        if (!allDone) return;
+    // 3. Email notifikace — pouze pro přihlášené uživatele
+    // Pro HDR: pošli email až po posledním výsledku (order_is_processing = false a všechny hotové)
+    if (order.user_id && order_id) {
+      // HDR order — zkontroluj jestli jsou všechny výsledky zpracovány
+      try {
+        const { data: allHdrOrders } = await supabase
+          .from('orders')
+          .select('image_id, payment_status')
+          .eq('hdr_order_id', order_id);
 
-        if (order.user_id) {
+        // Zjisti kolik výsledků Autoenhance vrátil celkem
+        const autoenhanceRes = await axios.get(`${API_BASE}/v3/orders/${order_id}`, {
+          headers: { 'x-api-key': API_KEY },
+        });
+        const totalImages = (autoenhanceRes.data.images ?? []).length;
+        const processedImages = (autoenhanceRes.data.images ?? []).filter(
+          (img: { status: string }) => img.status === 'processed'
+        );
+
+        const allHdrDone = processedImages.length === totalImages && totalImages > 0 && !autoenhanceRes.data.is_processing;
+
+        if (allHdrDone) {
+          const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
+          if (userData?.user?.email) {
+            await resend.emails.send({
+              from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
+              to: userData.user.email,
+              subject: `Vaše HDR fotografie jsou zpracovány ✓ (${processedImages.length} fotek)`,
+              html: notifyBatchEmailHtml(processedImages.length, GOPAY_RETURN_URL),
+            });
+          }
+        }
+      } catch (emailErr) {
+        console.error('Chyba při odesílání HDR emailu:', emailErr);
+      }
+      return;
+    }
+
+    // Non-HDR: batch nebo single email
+    if (order.user_id) {
+      if (order.upload_batch_id) {
+        const { data: batchOrders } = await supabase
+          .from('orders')
+          .select('image_id')
+          .eq('upload_batch_id', order.upload_batch_id);
+
+        if (batchOrders && batchOrders.length > 1) {
+          const statuses = await Promise.allSettled(
+            batchOrders.map(async (o) => {
+              const r = await axios.get(`${API_BASE}/v3/images/${o.image_id}`, { headers: { 'x-api-key': API_KEY } });
+              return r.data.status as string;
+            })
+          );
+          const allDone = statuses.every(
+            (s) => s.status === 'fulfilled' && ['processed', 'failed', 'error'].includes(s.value)
+          );
+          if (!allDone) return;
+
           try {
             const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
             if (userData?.user?.email) {
@@ -403,12 +479,10 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
               });
             }
           } catch (emailErr) { console.error('Chyba při odesílání batch emailu:', emailErr); }
+          return;
         }
-        return;
       }
-    }
 
-    if (order.user_id) {
       try {
         const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
         if (userData?.user?.email) {
