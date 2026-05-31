@@ -121,12 +121,34 @@ function OrderPageInner() {
             if (done) {
               clearInterval(pollInterval);
               clearInterval(progressInterval);
-              const finalImageId = image_ids[0];
-              setGroups(prev => prev.map(g =>
-                g.groupId === group.groupId
-                  ? { ...g, groupId: finalImageId, status: 'done', progress: 100, enhancedUrl: `${API_URL}/api/enhance/enhanced/${finalImageId}`, isHdrPending: false }
-                  : g
-              ));
+
+              if (image_ids.length === 1) {
+                // Jeden výsledek — jednoduchý update existující skupiny
+                const finalImageId = image_ids[0];
+                setGroups(prev => prev.map(g =>
+                  g.groupId === group.groupId
+                    ? { ...g, groupId: finalImageId, status: 'done', progress: 100,
+                        enhancedUrl: `${API_URL}/api/enhance/enhanced/${finalImageId}`,
+                        isHdrPending: false }
+                    : g
+                ));
+              } else {
+                // Více výsledků (auto groupování Autoenhance) —
+                // nahraď pending skupinu všemi výsledky jako samostatné skupiny v carouselu
+                const newGroups: GroupState[] = image_ids.map((id: string) => ({
+                  groupId: id,
+                  orderId: id,
+                  status: 'done' as Status,
+                  enhancedUrl: `${API_URL}/api/enhance/enhanced/${id}`,
+                  progress: 100,
+                  isHdrPending: false,
+                }));
+
+                setGroups(prev => [
+                  ...prev.filter(g => g.groupId !== group.groupId),
+                  ...newGroups,
+                ]);
+              }
             } else {
               updateGroup(group.groupId, { status: 'processing' });
             }
@@ -292,11 +314,14 @@ function OrderPageInner() {
   const activeGroup = groups[activeIdx];
   const allDone = groups.every(g => g.status === 'done' || g.status === 'error');
   const anyDone = groups.some(g => g.status === 'done');
-  // Všechny skupiny selhaly — zobraz error state místo spinneru
   const allFailed = groups.every(g => g.status === 'error');
   const selectedDoneGroups = groups.filter(g => selected.has(g.groupId) && g.status === 'done');
   const totalPrice = selectedDoneGroups.length * PRICE_CZK;
   const canBuy = selectedDoneGroups.length > 0 && agreedToTerms && agreedToPrivacy;
+
+  // isMultiGroup je počítáno dynamicky z aktuálního groups state
+  // (může se změnit když auto HDR vrátí více výsledků)
+  const currentlyMultiGroup = groups.length > 1;
 
   const toggleSelect = (groupId: string) => {
     setSelected(prev => {
@@ -342,7 +367,7 @@ function OrderPageInner() {
             <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 1.5rem' }}>✗</div>
             <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Zpracování selhalo</h2>
             <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: '2rem', lineHeight: 1.6 }}>
-              {isMultiGroup
+              {currentlyMultiGroup
                 ? 'Bohužel se nepodařilo zpracovat žádnou z HDR skupin.'
                 : 'Omlouváme se, došlo k chybě při zpracování fotografie.'}<br />
               Zkuste to prosím znovu nebo nás kontaktujte na{' '}
@@ -358,7 +383,7 @@ function OrderPageInner() {
               <>
                 <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 1.5rem' }}>✓</div>
                 <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                  {isMultiGroup
+                  {currentlyMultiGroup
                     ? `${groups.filter(g => g.status === 'done').length} z ${groups.length} fotografií připraveno!`
                     : 'Fotografie je připravena!'}
                 </h2>
@@ -370,7 +395,7 @@ function OrderPageInner() {
                 </div>
                 <div style={{ width: 48, height: 48, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 1.5rem', animation: 'spin 1s linear infinite' }} />
                 <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                  {isMultiGroup ? 'Zpracováváme vaše HDR fotografie…' : 'Zpracováváme vaši fotografii…'}
+                  {currentlyMultiGroup ? 'Zpracováváme vaše HDR fotografie…' : 'Zpracováváme vaši fotografii…'}
                 </h2>
                 <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '2rem' }}>
                   AI zpracování obvykle trvá 1–3 minuty.<br />
@@ -383,10 +408,10 @@ function OrderPageInner() {
             )}
 
             {/* ── Carousel / Náhled ── */}
-            {(anyDone || groups.some(g => g.status === 'processing')) && (
+            {anyDone && (
               <div style={{ marginBottom: '1.5rem' }}>
 
-                {isMultiGroup && (
+                {currentlyMultiGroup && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
                     <button
                       onClick={() => setActiveIdx(i => Math.max(0, i - 1))}
@@ -434,12 +459,12 @@ function OrderPageInner() {
                       onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.03)')}
                       onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
                     />
-                    {isMultiGroup && activeIdx > 0 && (
+                    {currentlyMultiGroup && activeIdx > 0 && (
                       <button onClick={e => { e.stopPropagation(); setActiveIdx(i => i - 1); }}
                         style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', width: 40, height: 40, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)' }}
                       >‹</button>
                     )}
-                    {isMultiGroup && activeIdx < groups.length - 1 && (
+                    {currentlyMultiGroup && activeIdx < groups.length - 1 && (
                       <button onClick={e => { e.stopPropagation(); setActiveIdx(i => i + 1); }}
                         style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', width: 40, height: 40, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)' }}
                       >›</button>
@@ -456,19 +481,19 @@ function OrderPageInner() {
                   <div style={{ borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg-secondary)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                     <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
                     <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                      {isMultiGroup ? `Zpracovávám skupinu ${activeIdx + 1}…` : 'Zpracovávám…'}
+                      {currentlyMultiGroup ? `Zpracovávám skupinu ${activeIdx + 1}…` : 'Zpracovávám…'}
                     </p>
                   </div>
                 ) : activeGroup?.status === 'error' ? (
                   <div style={{ borderRadius: 12, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.05)', height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <p style={{ fontSize: 13, color: '#ef4444' }}>
-                      {isMultiGroup ? `Zpracování skupiny ${activeIdx + 1} selhalo` : 'Zpracování selhalo'}
+                      {currentlyMultiGroup ? `Zpracování skupiny ${activeIdx + 1} selhalo` : 'Zpracování selhalo'}
                     </p>
                   </div>
                 ) : null}
 
                 {/* Slider dots */}
-                {isMultiGroup && (
+                {currentlyMultiGroup && (
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: '0.75rem', flexWrap: 'wrap' }}>
                     {groups.map((g, i) => (
                       <div
@@ -491,7 +516,7 @@ function OrderPageInner() {
                 )}
 
                 {/* Vybrat vše */}
-                {isMultiGroup && groups.some(g => g.status === 'done') && (
+                {currentlyMultiGroup && groups.some(g => g.status === 'done') && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: '0.75rem' }}>
                     <div
                       onClick={toggleSelectAll}
@@ -520,7 +545,7 @@ function OrderPageInner() {
                   Dokončit objednávku
                 </p>
 
-                {isMultiGroup && (
+                {currentlyMultiGroup && (
                   <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 16, background: selectedDoneGroups.length > 0 ? 'rgba(var(--accent-rgb,100,200,255),0.06)' : 'var(--bg)', border: `1px solid ${selectedDoneGroups.length > 0 ? 'var(--accent)' : 'var(--border)'}`, transition: 'all 0.2s ease' }}>
                     {selectedDoneGroups.length > 0 ? (
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -623,7 +648,7 @@ function OrderPageInner() {
                     style={{ flex: 2, padding: '13px', fontSize: 15, fontWeight: 700, borderRadius: 8, opacity: (!canBuy || buyLoading) ? 0.5 : 1, cursor: (!canBuy || buyLoading) ? 'not-allowed' : 'pointer' }}
                   >
                     {buyLoading ? 'Načítám…'
-                      : isMultiGroup && selectedDoneGroups.length > 0
+                      : currentlyMultiGroup && selectedDoneGroups.length > 0
                         ? `Koupit ${selectedDoneGroups.length} ${selectedDoneGroups.length === 1 ? 'fotografii' : 'fotografie'} — ${totalPrice} Kč`
                         : `Koupit & Stáhnout — ${PRICE_CZK} Kč`}
                   </button>
@@ -655,12 +680,12 @@ function OrderPageInner() {
         <div onClick={() => setLightbox(false)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(12px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out', animation: 'fadeIn 0.2s ease' }}>
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(rgba(0,0,0,0.6), transparent)' }}>
             <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: 500 }}>
-              {isMultiGroup ? `Skupina ${activeIdx + 1} / ${groups.length} — náhled s vodoznakem` : 'Náhled s vodoznakem'}
+              {currentlyMultiGroup ? `Skupina ${activeIdx + 1} / ${groups.length} — náhled s vodoznakem` : 'Náhled s vodoznakem'}
             </span>
             <button onClick={() => setLightbox(false)} style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
           </div>
           <img src={activeGroup.enhancedUrl} alt="Náhled" onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '82vh', objectFit: 'contain', borderRadius: 8, boxShadow: '0 30px 80px rgba(0,0,0,0.6)', animation: 'zoomIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)', cursor: 'default' }} />
-          {isMultiGroup && (
+          {currentlyMultiGroup && (
             <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '16px 20px', background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', display: 'flex', justifyContent: 'center', gap: 8 }}>
               <button onClick={e => { e.stopPropagation(); setActiveIdx(i => Math.max(0, i - 1)); }} disabled={activeIdx === 0}
                 style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', cursor: activeIdx === 0 ? 'not-allowed' : 'pointer', opacity: activeIdx === 0 ? 0.4 : 1, fontSize: 14 }}>
