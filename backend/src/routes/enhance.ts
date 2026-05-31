@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { randomUUID } from 'crypto';
 import { Request, Response, Router } from 'express';
 import fs from 'fs';
 import multer from 'multer';
@@ -20,31 +21,12 @@ const GOPAY_RETURN_URL = process.env.GOPAY_RETURN_URL || 'https://fasthdr.cz';
 const PRICE_CZK = parseInt(process.env.PRICE_CZK || '25');
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
-// ── Povolené typy souborů ─────────────────────────────────────────────────────
 const ALLOWED_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'heic', 'heif', 'avif', 'bmp', 'gif',
-  // RAW formáty
-  'arw', 'sr2', 'srf',   // Sony
-  'cr2', 'cr3', 'crw',   // Canon
-  'nef', 'nrw',          // Nikon
-  'raf',                  // Fuji
-  'orf',                  // Olympus
-  'rw2',                  // Panasonic
-  'pef',                  // Pentax
-  'kdc',                  // Kodak
-  'erf',                  // Epson
-  'dng',                  // Adobe DNG
-  'iiq',                  // Phase One
-  'mos',                  // Leaf
-  'mef',                  // Mamiya
-  'fff', '3fr',           // Hasselblad
-  'x3f',                  // Sigma
-  'rwl',                  // Leica
-  'srw',                  // Samsung
+  'arw', 'sr2', 'srf', 'cr2', 'cr3', 'crw', 'nef', 'nrw', 'raf', 'orf', 'rw2', 'pef',
+  'kdc', 'erf', 'dng', 'iiq', 'mos', 'mef', 'fff', '3fr', 'x3f', 'rwl', 'srw',
 ]);
 
-// MIME typy které jsou jednoznačně nepovoleným obsahem (i po přejmenování)
-// Výjimka: application/octet-stream používají některé RAW soubory — nevylučujeme
 const BLOCKED_MIME_PREFIXES = ['text/', 'video/', 'audio/'];
 const BLOCKED_MIME_EXACT = [
   'application/pdf', 'application/zip', 'application/x-rar-compressed',
@@ -55,27 +37,13 @@ const BLOCKED_MIME_EXACT = [
 function isFileAllowed(file: Express.Multer.File): { ok: boolean; reason?: string } {
   const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
   const mime = file.mimetype.toLowerCase();
-
-  // 1. Zkontroluj extension
   if (!ALLOWED_EXTENSIONS.has(ext)) {
-    return {
-      ok: false,
-      reason: `Nepodporovaný formát souboru (.${ext || 'neznámý'}). Povoleny jsou JPG, PNG, TIFF, WEBP, HEIC a RAW formáty (ARW, CR2, NEF, DNG…).`,
-    };
+    return { ok: false, reason: `Nepodporovaný formát souboru (.${ext || 'neznámý'}). Povoleny jsou JPG, PNG, TIFF, WEBP, HEIC a RAW formáty (ARW, CR2, NEF, DNG…).` };
   }
-
-  // 2. Odmítni jednoznačně nebezpečné MIME prefixy
   for (const blocked of BLOCKED_MIME_PREFIXES) {
-    if (mime.startsWith(blocked)) {
-      return { ok: false, reason: 'Nahraný soubor není platný obrázek.' };
-    }
+    if (mime.startsWith(blocked)) return { ok: false, reason: 'Nahraný soubor není platný obrázek.' };
   }
-
-  // 3. Odmítni konkrétní nebezpečné MIME typy
-  if (BLOCKED_MIME_EXACT.includes(mime)) {
-    return { ok: false, reason: 'Nahraný soubor není platný obrázek.' };
-  }
-
+  if (BLOCKED_MIME_EXACT.includes(mime)) return { ok: false, reason: 'Nahraný soubor není platný obrázek.' };
   return { ok: true };
 }
 
@@ -106,14 +74,8 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   const file = files['image']?.[0];
   if (!file) { res.status(400).json({ error: 'Žádný soubor nebyl nahrán' }); return; }
-
-  // ── Validace typu souboru ──
   const validation = isFileAllowed(file);
-  if (!validation.ok) {
-    res.status(415).json({ error: validation.reason });
-    return;
-  }
-
+  if (!validation.ok) { res.status(415).json({ error: validation.reason }); return; }
   try {
     const correctMime = getMimeType(file.originalname, file.mimetype);
     const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
@@ -121,33 +83,25 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
     const user_id = req.body.user_id || null;
     const session_id = req.body.session_id || null;
     const upload_batch_id = req.body.upload_batch_id || null;
-
-    const createResponse = await axios.post(
-      `${API_BASE}/v3/images/`,
-      {
-        image_name: file.originalname, image_type: ext, ai_version: '5.x', enhance: true,
-        enhance_type: rawSettings.enhance_type ?? 'neutral',
-        sky_replacement: rawSettings.sky_replacement ?? true,
-        cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
-        vertical_correction: rawSettings.vertical_correction ?? true,
-        lens_correction: rawSettings.lens_correction ?? true,
-        window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-        upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
-      },
-      { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } }
-    );
-
+    const createResponse = await axios.post(`${API_BASE}/v3/images/`, {
+      image_name: file.originalname, image_type: ext, ai_version: '5.x', enhance: true,
+      enhance_type: rawSettings.enhance_type ?? 'neutral',
+      sky_replacement: rawSettings.sky_replacement ?? true,
+      cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
+      vertical_correction: rawSettings.vertical_correction ?? true,
+      lens_correction: rawSettings.lens_correction ?? true,
+      window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
+      upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+    }, { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
     const { image_id, s3PutObjectUrl: upload_url } = createResponse.data;
     const urlParams = new URL(upload_url);
     const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
     await axios.put(upload_url, file.buffer, { headers: { 'Content-Type': contentTypeFromUrl } });
-
     await supabase.from('orders').insert({
       image_id, filename: file.originalname, payment_status: 'pending',
       amount_czk: PRICE_CZK, user_id: user_id || null, session_id: session_id || null,
       payment_session_id: `pending_${image_id}`, upload_batch_id: upload_batch_id || null,
     }).select();
-
     res.json({ image_id });
   } catch (error) {
     console.error('Chyba při uploadu:', error);
@@ -176,7 +130,6 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
       headers: { 'x-api-key': API_KEY }, responseType: 'arraybuffer',
       params: { preview: preview ? 'true' : 'false', quality: preview ? 60 : 90 },
     });
-
     if (preview) {
       const sharp = require('sharp');
       const imageBuffer = Buffer.from(response.data);
@@ -191,7 +144,6 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
         if (fs.existsSync(logoDarkPath)) logoDarkBase64 = fs.readFileSync(logoDarkPath).toString('base64');
         if (fs.existsSync(logoLightPath)) logoLightBase64 = fs.readFileSync(logoLightPath).toString('base64');
       } catch (err) { console.warn('Loga nenalezena:', err); }
-
       const svgWatermark = Buffer.from(`
         <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -206,7 +158,6 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
           <rect width="100%" height="100%" fill="url(#wm-light)"/>
         </svg>
       `);
-
       const watermarked = await sharp(imageBuffer)
         .composite([{ input: svgWatermark, top: 0, left: 0 }])
         .jpeg({ quality: 60 }).toBuffer();
@@ -251,14 +202,8 @@ router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), 
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   const file = files['image']?.[0];
   if (!file) { res.status(400).json({ error: 'Žádný soubor nebyl nahrán' }); return; }
-
-  // ── Validace typu souboru ──
   const validation = isFileAllowed(file);
-  if (!validation.ok) {
-    res.status(415).json({ error: validation.reason });
-    return;
-  }
-
+  if (!validation.ok) { res.status(415).json({ error: validation.reason }); return; }
   try {
     const correctMime = getMimeType(file.originalname, file.mimetype);
     const order_id = req.body.order_id;
@@ -267,7 +212,6 @@ router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), 
       { order_id, name: file.originalname },
       { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
     const upload_url = createResponse.data.upload_url ?? createResponse.data.s3PutObjectUrl;
-    const bracket_id = createResponse.data.bracket_id ?? createResponse.data.image_id;
     if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
     const urlParams = new URL(upload_url);
     const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
@@ -275,7 +219,7 @@ router.post('/upload-bracket', upload.fields([{ name: 'image', maxCount: 1 }]), 
       headers: { 'Content-Type': contentTypeFromUrl },
       maxBodyLength: Infinity, maxContentLength: Infinity,
     });
-    res.json({ bracket_id });
+    res.json({ bracket_id: createResponse.data.bracket_id ?? createResponse.data.image_id });
   } catch (error) {
     console.error('Chyba při uploadu bracketu:', error);
     res.status(500).json({ error: 'Chyba při uploadu bracketu' });
@@ -322,6 +266,143 @@ router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => 
   }
 });
 
+// ── Cloud Import (Dropbox / Google Drive → server-to-server) ─────────────────
+// Frontend pošle pouze metadata — backend stáhne soubory přímo ze serverů.
+// Odpovídá 202 okamžitě, uživatel může zavřít stránku.
+router.post('/cloud-import', async (req: Request, res: Response) => {
+  const {
+    source,
+    files,
+    access_token,
+    settings: rawSettings = {},
+    hdr_mode = false,
+    user_id = null,
+    session_id = null,
+  } = req.body;
+
+  if (!source || !files || !Array.isArray(files) || files.length === 0) {
+    res.status(400).json({ error: 'Chybí source nebo files' });
+    return;
+  }
+  if (source === 'google_drive' && !access_token) {
+    res.status(400).json({ error: 'Chybí access_token pro Google Drive' });
+    return;
+  }
+
+  // Okamžitě odpověz — uživatel může odejít
+  res.status(202).json({ ok: true, message: 'Přijato ke zpracování' });
+
+  // ── Zpracování na pozadí ──────────────────────────────────────────────────
+  (async () => {
+    try {
+      const downloadFile = async (file: { url?: string; id?: string; name: string; mimeType?: string }): Promise<Buffer> => {
+        if (source === 'dropbox') {
+          const url = (file.url as string).replace('dl=0', 'dl=1');
+          const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 5 * 60 * 1000 });
+          return Buffer.from(response.data);
+        } else {
+          const response = await axios.get(
+            `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+            { headers: { Authorization: `Bearer ${access_token}` }, responseType: 'arraybuffer', timeout: 5 * 60 * 1000 }
+          );
+          return Buffer.from(response.data);
+        }
+      };
+
+      if (hdr_mode) {
+        // ── HDR flow ──────────────────────────────────────────────────────
+        const orderRes = await axios.post(`${API_BASE}/v3/orders/`, {},
+          { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+        const order_id = orderRes.data.order_id;
+
+        await supabase.from('orders').insert({
+          image_id: `hdr_pending_${order_id}`,
+          filename: files[0]?.name ?? null,
+          payment_status: 'pending', amount_czk: PRICE_CZK,
+          user_id: user_id || null, session_id: session_id || null,
+          hdr_order_id: order_id, payment_session_id: `pending_hdr_${order_id}`,
+        });
+
+        for (const file of files) {
+          try {
+            const buffer = await downloadFile(file);
+            const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
+            const bracketRes = await axios.post(`${API_BASE}/v3/brackets/`,
+              { order_id, name: file.name },
+              { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+            const upload_url = bracketRes.data.upload_url ?? bracketRes.data.s3PutObjectUrl;
+            if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
+            const urlParams = new URL(upload_url);
+            const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
+            await axios.put(upload_url, buffer, {
+              headers: { 'Content-Type': contentTypeFromUrl },
+              maxBodyLength: Infinity, maxContentLength: Infinity,
+            });
+          } catch (fileErr) {
+            console.error(`[cloud-import] Chyba při uploadu bracketu ${file.name}:`, fileErr);
+          }
+        }
+
+        const mergeBody: Record<string, unknown> = {
+          hdr: true, ai_version: '5.x', enhance: true,
+          enhance_type: rawSettings.enhance_type ?? 'neutral',
+          sky_replacement: rawSettings.sky_replacement ?? true,
+          cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
+          vertical_correction: rawSettings.vertical_correction ?? true,
+          lens_correction: rawSettings.lens_correction ?? true,
+          window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
+          upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+        };
+        await axios.post(`${API_BASE}/v3/orders/${order_id}/process`, mergeBody,
+          { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+
+        console.log(`[cloud-import] HDR order ${order_id} spuštěn, ${files.length} bracketů`);
+
+      } else {
+        // ── Non-HDR flow ──────────────────────────────────────────────────
+        const upload_batch_id = randomUUID();
+
+        for (const file of files) {
+          try {
+            const ext = path.extname(file.name).toLowerCase().replace('.', '');
+            if (!ALLOWED_EXTENSIONS.has(ext)) {
+              console.warn(`[cloud-import] Přeskočen nepodporovaný formát: ${file.name}`);
+              continue;
+            }
+            const buffer = await downloadFile(file);
+            const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
+            const createRes = await axios.post(`${API_BASE}/v3/images/`, {
+              image_name: file.name, image_type: ext, ai_version: '5.x', enhance: true,
+              enhance_type: rawSettings.enhance_type ?? 'neutral',
+              sky_replacement: rawSettings.sky_replacement ?? true,
+              cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
+              vertical_correction: rawSettings.vertical_correction ?? true,
+              lens_correction: rawSettings.lens_correction ?? true,
+              window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
+              upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+            }, { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+            const { image_id, s3PutObjectUrl: upload_url } = createRes.data;
+            const urlParams = new URL(upload_url);
+            const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
+            await axios.put(upload_url, buffer, { headers: { 'Content-Type': contentTypeFromUrl } });
+            await supabase.from('orders').insert({
+              image_id, filename: file.name, payment_status: 'pending',
+              amount_czk: PRICE_CZK, user_id: user_id || null, session_id: session_id || null,
+              payment_session_id: `pending_${image_id}`, upload_batch_id,
+            });
+            console.log(`[cloud-import] Uploadnut ${file.name} → ${image_id}`);
+          } catch (fileErr) {
+            console.error(`[cloud-import] Chyba při zpracování ${file.name}:`, fileErr);
+          }
+        }
+        console.log(`[cloud-import] Non-HDR batch dokončen, ${files.length} souborů`);
+      }
+    } catch (err) {
+      console.error('[cloud-import] Fatální chyba:', err);
+    }
+  })();
+});
+
 // ── Souhlas ───────────────────────────────────────────────────────────────────
 router.post('/consent', async (req: Request, res: Response) => {
   try {
@@ -366,43 +447,25 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
     if (event !== 'image_processed' || error) return;
 
     let order = null;
-
-    // 1. Zkus najít přímý order podle image_id (non-HDR flow)
     const { data: directOrder } = await supabase.from('orders').select('*').eq('image_id', image_id).single();
     if (directOrder) order = directOrder;
 
-    // 2. HDR flow — order_id odkazuje na hdr_order_id
     if (!order && order_id && !order_is_processing) {
       const { data: hdrOrder } = await supabase.from('orders').select('*').eq('hdr_order_id', order_id).single();
-
       if (hdrOrder) {
         if (hdrOrder.image_id === `hdr_pending_${order_id}`) {
-          // ── První výsledek: aktualizuj existující řádek ───────────────────
           await supabase.from('orders').update({ image_id }).eq('hdr_order_id', order_id);
           order = { ...hdrOrder, image_id };
         } else {
-          // ── Další výsledky: zkontroluj jestli tento image_id už existuje ──
-          const { data: existingResult } = await supabase
-            .from('orders')
-            .select('id')
-            .eq('image_id', image_id) 
-            .single();
-
+          const { data: existingResult } = await supabase.from('orders').select('id').eq('image_id', image_id).single();
           if (!existingResult) {
-            // Vytvoř nový řádek pro každý další výsledek HDR orderu
             await supabase.from('orders').insert({
-              image_id,
-              filename: hdrOrder.filename,
-              payment_status: 'pending',
-              amount_czk: PRICE_CZK,
-              user_id: hdrOrder.user_id,
-              session_id: hdrOrder.session_id,
-              hdr_order_id: order_id,
-              payment_session_id: `pending_${image_id}`,
+              image_id, filename: hdrOrder.filename, payment_status: 'pending',
+              amount_czk: PRICE_CZK, user_id: hdrOrder.user_id, session_id: hdrOrder.session_id,
+              hdr_order_id: order_id, payment_session_id: `pending_${image_id}`,
               upload_batch_id: hdrOrder.upload_batch_id,
             });
           }
-
           order = { ...hdrOrder, image_id };
         }
       }
@@ -410,27 +473,12 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
 
     if (!order) return;
 
-    // 3. Email notifikace — pouze pro přihlášené uživatele
-    // Pro HDR: pošli email až po posledním výsledku (order_is_processing = false a všechny hotové)
     if (order.user_id && order_id) {
-      // HDR order — zkontroluj jestli jsou všechny výsledky zpracovány
       try {
-        const { data: allHdrOrders } = await supabase
-          .from('orders')
-          .select('image_id, payment_status')
-          .eq('hdr_order_id', order_id);
-
-        // Zjisti kolik výsledků Autoenhance vrátil celkem
-        const autoenhanceRes = await axios.get(`${API_BASE}/v3/orders/${order_id}`, {
-          headers: { 'x-api-key': API_KEY },
-        });
+        const autoenhanceRes = await axios.get(`${API_BASE}/v3/orders/${order_id}`, { headers: { 'x-api-key': API_KEY } });
         const totalImages = (autoenhanceRes.data.images ?? []).length;
-        const processedImages = (autoenhanceRes.data.images ?? []).filter(
-          (img: { status: string }) => img.status === 'processed'
-        );
-
+        const processedImages = (autoenhanceRes.data.images ?? []).filter((img: { status: string }) => img.status === 'processed');
         const allHdrDone = processedImages.length === totalImages && totalImages > 0 && !autoenhanceRes.data.is_processing;
-
         if (allHdrDone) {
           const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
           if (userData?.user?.email) {
@@ -442,20 +490,13 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
             });
           }
         }
-      } catch (emailErr) {
-        console.error('Chyba při odesílání HDR emailu:', emailErr);
-      }
+      } catch (emailErr) { console.error('Chyba při odesílání HDR emailu:', emailErr); }
       return;
     }
 
-    // Non-HDR: batch nebo single email
     if (order.user_id) {
       if (order.upload_batch_id) {
-        const { data: batchOrders } = await supabase
-          .from('orders')
-          .select('image_id')
-          .eq('upload_batch_id', order.upload_batch_id);
-
+        const { data: batchOrders } = await supabase.from('orders').select('image_id').eq('upload_batch_id', order.upload_batch_id);
         if (batchOrders && batchOrders.length > 1) {
           const statuses = await Promise.allSettled(
             batchOrders.map(async (o) => {
@@ -463,11 +504,8 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
               return r.data.status as string;
             })
           );
-          const allDone = statuses.every(
-            (s) => s.status === 'fulfilled' && ['processed', 'failed', 'error'].includes(s.value)
-          );
+          const allDone = statuses.every((s) => s.status === 'fulfilled' && ['processed', 'failed', 'error'].includes(s.value));
           if (!allDone) return;
-
           try {
             const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
             if (userData?.user?.email) {
@@ -482,7 +520,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
           return;
         }
       }
-
       try {
         const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
         if (userData?.user?.email) {
@@ -529,118 +566,14 @@ router.post('/notify', async (req: Request, res: Response) => {
 // ── Email šablony ─────────────────────────────────────────────────────────────
 function notifyBatchEmailHtml(count: number, frontendUrl: string): string {
   const year = new Date().getFullYear();
-  return `<!DOCTYPE html>
-    <html lang="cs">
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Zpracování dokončeno — FastHDR</title>
-    </head>
-    <body style="margin:0;padding:0;background:#09090F;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;color:#ffffff;">
-      <div style="display:none;max-height:0;overflow:hidden;">Všechny vaše fotografie (${count}) byly úspěšně zpracovány.</div>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090F;padding:32px 16px;">
-        <tr><td align="center">
-          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
-            <tr><td align="center" style="padding:0 0 32px;">
-              <img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;">
-            </td></tr>
-            <tr><td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
-                <tr><td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;">
-                  <span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">● Zpracováno</span>
-                </td></tr>
-              </table>
-              <h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">Vaše fotografie<br>jsou připraveny</h1>
-              <p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">Všech <strong style="color:#ffffff;font-weight:600;">${count} fotografií</strong> bylo úspěšně zpracováno pomocí AI modelu v5. Prohlédněte si náhledy a stáhněte výsledky v plném rozlišení.</p>
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
-                <tr><td style="background:#7B5CF0;border-radius:10px;">
-                  <a href="${frontendUrl}/dashboard" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Zobrazit fotografie →</a>
-                </td></tr>
-              </table>
-              <div style="height:1px;background:#22222E;margin:0 0 24px;"></div>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Počet fotek</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${count}</td></tr>
-                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena za fotku</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td></tr>
-                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření</td></tr>
-                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td><td style="padding:8px 0;font-size:13px;"><a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a></td></tr>
-              </table>
-            </td></tr>
-            <tr><td style="padding:24px 32px 0;">
-              <p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">Potřebujete pomoc? Napište nám na <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a></p>
-            </td></tr>
-            <tr><td style="padding:40px 32px 16px;border-top:1px solid #16161F;">
-              <p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;">
-                <strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>
-                Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br>
-                <a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a> · <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a> · <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a>
-              </p>
-              <p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">© ${year} FASTHDR. Všechna práva vyhrazena.</p>
-            </td></tr>
-          </table>
-        </td></tr>
-      </table>
-    </body>
-    </html>`;
+  return `<!DOCTYPE html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Zpracování dokončeno — FastHDR</title></head><body style="margin:0;padding:0;background:#09090F;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;color:#ffffff;"><div style="display:none;max-height:0;overflow:hidden;">Všechny vaše fotografie (${count}) byly úspěšně zpracovány.</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090F;padding:32px 16px;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;"><tr><td align="center" style="padding:0 0 32px;"><img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;"></td></tr><tr><td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;"><span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">● Zpracováno</span></td></tr></table><h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">Vaše fotografie<br>jsou připraveny</h1><p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">Všech <strong style="color:#ffffff;font-weight:600;">${count} fotografií</strong> bylo úspěšně zpracováno pomocí AI modelu v5.</p><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;"><tr><td style="background:#7B5CF0;border-radius:10px;"><a href="${frontendUrl}/dashboard" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Zobrazit fotografie →</a></td></tr></table><div style="height:1px;background:#22222E;margin:0 0 24px;"></div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Počet fotek</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${count}</td></tr><tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena za fotku</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td></tr><tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření</td></tr><tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td><td style="padding:8px 0;font-size:13px;"><a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a></td></tr></table></td></tr><tr><td style="padding:24px 32px 0;"><p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">Potřebujete pomoc? Napište nám na <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a></p></td></tr><tr><td style="padding:40px 32px 16px;border-top:1px solid #16161F;"><p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;"><strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br><a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a> · <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a> · <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a></p><p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">© ${year} FASTHDR. Všechna práva vyhrazena.</p></td></tr></table></td></tr></table></body></html>`;
 }
 
 function notifyEmailHtml(filename: string, imageId: string, frontendUrl: string): string {
   const safeName = filename ?? 'bez názvu';
   const safeRef = filename ?? imageId;
   const year = new Date().getFullYear();
-  return `<!DOCTYPE html>
-    <html lang="cs">
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <meta name="color-scheme" content="dark">
-      <meta name="supported-color-schemes" content="dark">
-      <title>Zpracování dokončeno — FastHDR</title>
-    </head>
-    <body style="margin:0;padding:0;background:#09090F;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;color:#ffffff;-webkit-font-smoothing:antialiased;">
-      <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#09090F;">Vaše fotografie ${safeName} byla úspěšně zpracována. Prohlédněte si náhled.</div>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090F;padding:32px 16px;">
-        <tr><td align="center">
-          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
-            <tr><td align="center" style="padding:0 0 32px;">
-              <img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;outline:none;text-decoration:none;">
-            </td></tr>
-            <tr><td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
-                <tr><td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;">
-                  <span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">● Zpracováno</span>
-                </td></tr>
-              </table>
-              <h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">Vaše fotografie<br>je připravena</h1>
-              <p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">Soubor <strong style="color:#ffffff;font-weight:600;">${safeName}</strong> byl úspěšně zpracován pomocí AI modelu v5. Prohlédněte si náhled zdarma a stáhněte si výsledek v plném rozlišení.</p>
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
-                <tr><td style="background:#7B5CF0;border-radius:10px;">
-                  <a href="${frontendUrl}/dashboard" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">Zobrazit fotografii →</a>
-                </td></tr>
-              </table>
-              <div style="height:1px;background:#22222E;margin:0 0 24px;"></div>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Soubor</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;word-break:break-all;">${safeRef}</td></tr>
-                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td></tr>
-                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření fotografie</td></tr>
-                <tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td><td style="padding:8px 0;font-size:13px;"><a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a></td></tr>
-              </table>
-            </td></tr>
-            <tr><td style="padding:24px 32px 0;">
-              <p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">Potřebujete pomoc? Napište nám na <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a></p>
-            </td></tr>
-            <tr><td style="padding:40px 32px 16px;border-top:1px solid #16161F;margin-top:32px;">
-              <p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;">
-                <strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>
-                Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br>
-                <a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a> · <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a> · <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a>
-              </p>
-              <p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">© ${year} FASTHDR. Všechna práva vyhrazena.</p>
-            </td></tr>
-          </table>
-        </td></tr>
-      </table>
-    </body>
-    </html>`;
+  return `<!DOCTYPE html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Zpracování dokončeno — FastHDR</title></head><body style="margin:0;padding:0;background:#09090F;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;color:#ffffff;"><div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#09090F;">Vaše fotografie ${safeName} byla úspěšně zpracována.</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090F;padding:32px 16px;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;"><tr><td align="center" style="padding:0 0 32px;"><img src="${frontendUrl}/logo-dark.png" alt="FASTHDR" width="160" style="display:block;height:auto;border:0;"></td></tr><tr><td style="background:linear-gradient(180deg,#13131C 0%,#0F0F18 100%);border:1px solid #22222E;border-radius:16px;padding:40px 32px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td style="background:#1E1535;border:1px solid #2E2350;border-radius:24px;padding:8px 16px;"><span style="font-size:12px;font-weight:600;color:#A990F5;letter-spacing:0.5px;text-transform:uppercase;">● Zpracováno</span></td></tr></table><h1 style="font-size:30px;line-height:1.2;font-weight:700;color:#ffffff;margin:0 0 12px;letter-spacing:-0.02em;">Vaše fotografie<br>je připravena</h1><p style="font-size:15px;line-height:1.6;color:#AAAABC;margin:0 0 32px;">Soubor <strong style="color:#ffffff;font-weight:600;">${safeName}</strong> byl úspěšně zpracován pomocí AI modelu v5.</p><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;"><tr><td style="background:#7B5CF0;border-radius:10px;"><a href="${frontendUrl}/dashboard" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Zobrazit fotografii →</a></td></tr></table><div style="height:1px;background:#22222E;margin:0 0 24px;"></div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:8px 0;font-size:13px;color:#8888A0;width:120px;">Soubor</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;word-break:break-all;">${safeRef}</td></tr><tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Cena</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">${PRICE_CZK} Kč</td></tr><tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupnost</td><td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní od vytvoření</td></tr><tr><td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td><td style="padding:8px 0;font-size:13px;"><a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;font-weight:500;">info@fasthdr.cz</a></td></tr></table></td></tr><tr><td style="padding:24px 32px 0;"><p style="font-size:13px;line-height:1.6;color:#8888A0;margin:0;text-align:center;">Potřebujete pomoc? Napište nám na <a href="mailto:info@fasthdr.cz" style="color:#A990F5;text-decoration:none;">info@fasthdr.cz</a></p></td></tr><tr><td style="padding:40px 32px 16px;border-top:1px solid #16161F;"><p style="font-size:11px;line-height:1.7;color:#555568;margin:24px 0 0;text-align:center;"><strong style="color:#8888A0;">FASTHDR</strong> · Profesionální AI úprava fotografií<br>Filip Zemek · IČO: 23584203 · Drnovec 1, 471 54 Cvikov<br><a href="${frontendUrl}" style="color:#8888A0;text-decoration:none;">fasthdr.cz</a> · <a href="${frontendUrl}/podminky" style="color:#8888A0;text-decoration:none;">Podmínky</a> · <a href="${frontendUrl}/ochrana-soukromi" style="color:#8888A0;text-decoration:none;">Ochrana soukromí</a></p><p style="font-size:11px;color:#444455;margin:16px 0 0;text-align:center;">© ${year} FASTHDR. Všechna práva vyhrazena.</p></td></tr></table></td></tr></table></body></html>`;
 }
 
 export default router;

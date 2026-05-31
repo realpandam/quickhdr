@@ -2,9 +2,14 @@
 
 import Script from 'next/script';
 import { useCallback, useRef, useState } from 'react';
+import { API_URL } from '../lib/config';
+import { supabase } from '../lib/supabase';
+import type { Settings } from './SettingsPanel';
 
 interface Props {
     onFiles: (files: File[]) => void;
+    settings?: Settings;
+    hdrMode?: boolean;
 }
 
 declare global {
@@ -43,45 +48,67 @@ const DROPBOX_EXTENSIONS = [
     '.kdc', '.erf', '.iiq', '.mos', '.mef', '.fff', '.3fr', '.x3f', '.rwl',
 ];
 
-const BATCH_SIZE = 5;
+type CloudState = 'idle' | 'submitting' | 'accepted' | 'error';
 
-export default function CloudPicker({ onFiles }: Props) {
+export default function CloudPicker({ onFiles, settings, hdrMode = false }: Props) {
     const tokenClient = useRef<{ requestAccessToken: () => void } | null>(null);
     const accessToken = useRef<string>('');
 
-    // ── Loading state pro zobrazení progressu stahování ───────────────────
-    const [downloading, setDownloading] = useState(false);
-    const [downloadProgress, setDownloadProgress] = useState({ done: 0, total: 0, source: '' });
+    const [cloudState, setCloudState] = useState<CloudState>('idle');
+    const [cloudSource, setCloudSource] = useState('');
+    const [fileCount, setFileCount] = useState(0);
+    const [errorMsg, setErrorMsg] = useState('');
+
+    // ── Odešli metadata na backend (server-to-server) ─────────────────────
+    const sendToBackend = useCallback(async (
+        source: 'dropbox' | 'google_drive',
+        files: { url?: string; id?: string; name: string; mimeType?: string }[],
+        token?: string,
+    ) => {
+        setCloudState('submitting');
+        setCloudSource(source === 'dropbox' ? 'Dropbox' : 'Google Drive');
+        setFileCount(files.length);
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            const session_id = sessionStorage.getItem('fasthdr_session_id') ?? undefined;
+
+            const body: Record<string, unknown> = {
+                source,
+                files,
+                settings: settings ?? {},
+                hdr_mode: hdrMode,
+                user_id: user?.id ?? null,
+                session_id: session_id ?? null,
+            };
+            if (token) body.access_token = token;
+
+            const res = await fetch(`${API_URL}/api/enhance/cloud-import`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            if (res.status === 202) {
+                setCloudState('accepted');
+            } else {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error ?? `Chyba serveru (${res.status})`);
+            }
+        } catch (err) {
+            console.error('[CloudPicker] Chyba:', err);
+            setErrorMsg(err instanceof Error ? err.message : 'Nepodařilo se odeslat soubory');
+            setCloudState('error');
+        }
+    }, [settings, hdrMode]);
 
     // ── Dropbox Chooser SDK ───────────────────────────────────────────────
     const openDropbox = useCallback(() => {
-        if (!window.Dropbox) {
-            console.error('Dropbox SDK is not loaded');
-            return;
-        }
-
+        if (!window.Dropbox) { console.error('Dropbox SDK is not loaded'); return; }
         window.Dropbox.choose({
             success: async (files) => {
-                setDownloading(true);
-                setDownloadProgress({ done: 0, total: files.length, source: 'Dropbox' });
-
-                const result: File[] = [];
-                for (let i = 0; i < files.length; i += BATCH_SIZE) {
-                    const batch = files.slice(i, i + BATCH_SIZE);
-                    const batchFiles = await Promise.all(
-                        batch.map(async (f) => {
-                            const url = f.link.replace('dl=0', 'dl=1');
-                            const res = await fetch(url);
-                            const blob = await res.blob();
-                            return new File([blob], f.name, { type: blob.type });
-                        })
-                    );
-                    result.push(...batchFiles);
-                    setDownloadProgress(prev => ({ ...prev, done: Math.min(i + BATCH_SIZE, files.length) }));
-                }
-
-                setDownloading(false);
-                onFiles(result);
+                const metadata = files.map(f => ({ url: f.link, name: f.name }));
+                await sendToBackend('dropbox', metadata);
                 document.getElementById('editor')?.scrollIntoView({ behavior: 'smooth' });
             },
             cancel: () => {
@@ -91,7 +118,7 @@ export default function CloudPicker({ onFiles }: Props) {
             multiselect: true,
             extensions: DROPBOX_EXTENSIONS,
         });
-    }, [onFiles]);
+    }, [sendToBackend]);
 
     // ── Google Drive Picker ───────────────────────────────────────────────
     const showPicker = useCallback((token: string) => {
@@ -100,14 +127,9 @@ export default function CloudPicker({ onFiles }: Props) {
                 try {
                     const pickerRoot = window.gapi.picker;
                     const api = pickerRoot?.ViewId ? pickerRoot : pickerRoot?.api;
-
-                    if (!api?.ViewId) {
-                        console.error('Google Picker API není dostupné', pickerRoot);
-                        return;
-                    }
+                    if (!api?.ViewId) { console.error('Google Picker API není dostupné'); return; }
 
                     const docsView = new api.DocsView(api.ViewId.DOCS);
-
                     const p = new api.PickerBuilder()
                         .addView(docsView)
                         .setOAuthToken(token)
@@ -117,40 +139,23 @@ export default function CloudPicker({ onFiles }: Props) {
                         .enableFeature(api.Feature?.MULTISELECT_ENABLED ?? 'multiselectEnabled')
                         .setCallback(async (data: any) => {
                             if (data.action !== 'picked') return;
-
-                            setDownloading(true);
-                            setDownloadProgress({ done: 0, total: data.docs.length, source: 'Google Drive' });
-
-                            const result: File[] = [];
-                            for (let i = 0; i < data.docs.length; i += BATCH_SIZE) {
-                                const batch = data.docs.slice(i, i + BATCH_SIZE);
-                                const batchFiles = await Promise.all(
-                                    batch.map(async (doc: any) => {
-                                        const res = await fetch(
-                                            `https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`,
-                                            { headers: { Authorization: `Bearer ${token}` } }
-                                        );
-                                        const blob = await res.blob();
-                                        return new File([blob], doc.name, { type: doc.mimeType });
-                                    })
-                                );
-                                result.push(...batchFiles);
-                                setDownloadProgress(prev => ({ ...prev, done: Math.min(i + BATCH_SIZE, data.docs.length) }));
-                            }
-
-                            setDownloading(false);
-                            onFiles(result);
+                            const metadata = data.docs.map((doc: any) => ({
+                                id: doc.id,
+                                name: doc.name,
+                                mimeType: doc.mimeType,
+                            }));
+                            await sendToBackend('google_drive', metadata, token);
                         })
                         .build();
-
                     p.setVisible(true);
                 } catch (err) {
                     console.error('Picker error:', err);
-                    setDownloading(false);
+                    setCloudState('error');
+                    setErrorMsg('Nepodařilo se otevřít Google Picker');
                 }
             }, 100);
         });
-    }, [onFiles]);
+    }, [sendToBackend]);
 
     const handleGoogleDrive = useCallback(() => {
         if (accessToken.current) {
@@ -160,9 +165,7 @@ export default function CloudPicker({ onFiles }: Props) {
         }
     }, [showPicker]);
 
-    const progressPct = downloadProgress.total > 0
-        ? Math.round((downloadProgress.done / downloadProgress.total) * 100)
-        : 0;
+    const isbusy = cloudState === 'submitting';
 
     return (
         <>
@@ -173,12 +176,8 @@ export default function CloudPicker({ onFiles }: Props) {
                 data-app-key={process.env.NEXT_PUBLIC_DROPBOX_APP_KEY}
                 strategy="afterInteractive"
             />
-
             {/* Google API */}
-            <Script
-                src="https://apis.google.com/js/api.js"
-                strategy="afterInteractive"
-            />
+            <Script src="https://apis.google.com/js/api.js" strategy="afterInteractive" />
             <Script
                 src="https://accounts.google.com/gsi/client"
                 strategy="afterInteractive"
@@ -196,16 +195,14 @@ export default function CloudPicker({ onFiles }: Props) {
 
             {/* Tlačítka */}
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', marginBottom: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>
-                    nebo importovat z
-                </p>
-                <button onClick={openDropbox} disabled={downloading} className="btn" style={{ fontSize: 12, padding: '6px 14px', gap: 6, opacity: downloading ? 0.5 : 1 }}>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>nebo importovat z</p>
+                <button onClick={openDropbox} disabled={isbusy} className="btn" style={{ fontSize: 12, padding: '6px 14px', gap: 6, opacity: isbusy ? 0.5 : 1 }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M6 2L0 6l6 4-6 4 6 4 6-4-6-4 6-4L6 2zm12 0l-6 4 6 4-6 4 6 4 6-4-6-4 6-4-6-4zm-6 9l-6 4 6 4 6-4-6-4z" />
                     </svg>
                     Dropbox
                 </button>
-                <button onClick={handleGoogleDrive} disabled={downloading} className="btn" style={{ fontSize: 12, padding: '6px 14px', gap: 6, opacity: downloading ? 0.5 : 1 }}>
+                <button onClick={handleGoogleDrive} disabled={isbusy} className="btn" style={{ fontSize: 12, padding: '6px 14px', gap: 6, opacity: isbusy ? 0.5 : 1 }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M8.567 9.401L4.5 2.5h7.933L16.5 9.401H8.567zM0 16.5l4.067-7.099L8.133 16.5H0zm16.5 0l-4.067-7.099 4.067-7.099L20.567 9.5 24 16.5H16.5z" />
                     </svg>
@@ -213,60 +210,48 @@ export default function CloudPicker({ onFiles }: Props) {
                 </button>
             </div>
 
-            {/* Loading overlay — zobrazí se během stahování souborů z cloudu */}
-            {downloading && (
-                <div style={{
-                    position: 'fixed', inset: 0, zIndex: 2000,
-                    background: 'rgba(0,0,0,0.75)',
-                    backdropFilter: 'blur(8px)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                    <div style={{
-                        background: 'var(--bg-card)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 16,
-                        padding: '2rem 2.5rem',
-                        width: 340,
-                        textAlign: 'center',
-                        boxShadow: '0 30px 80px rgba(0,0,0,0.5)',
-                    }}>
-                        {/* Spinner */}
-                        <div style={{
-                            width: 48, height: 48,
-                            border: '3px solid var(--border)',
-                            borderTop: '3px solid var(--accent)',
-                            borderRadius: '50%',
-                            margin: '0 auto 1.5rem',
-                            animation: 'spin 1s linear infinite',
-                        }} />
-
+            {/* Odesílání na backend — krátký spinner */}
+            {cloudState === 'submitting' && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: '2rem 2.5rem', width: 340, textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
+                        <div style={{ width: 48, height: 48, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 1.5rem', animation: 'spin 1s linear infinite' }} />
                         <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                            Stahuji z {downloadProgress.source}…
+                            Předávám soubory serveru…
                         </p>
-                        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-                            {downloadProgress.done} z {downloadProgress.total} souborů · Nezavírejte tuto stránku
-                        </p>
-
-                        {/* Progress bar */}
-                        <div style={{
-                            height: 6, background: 'var(--border)',
-                            borderRadius: 999, overflow: 'hidden',
-                        }}>
-                            <div style={{
-                                height: '100%',
-                                width: `${progressPct}%`,
-                                background: 'linear-gradient(90deg, #6B47DC, #A78BFA)',
-                                borderRadius: 999,
-                                transition: 'width 0.3s ease',
-                                boxShadow: '0 0 8px rgba(139,92,246,0.5)',
-                            }} />
-                        </div>
-                        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: '0.75rem' }}>
-                            {progressPct}%
+                        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                            {fileCount} souborů z {cloudSource}
                         </p>
                     </div>
-
                     <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                </div>
+            )}
+
+            {/* Přijato — uživatel může odejít */}
+            {cloudState === 'accepted' && (
+                <div style={{ margin: '1rem 0', padding: '1rem 1.25rem', background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 10, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <span style={{ fontSize: 20, flexShrink: 0 }}>✓</span>
+                    <div>
+                        <p style={{ fontSize: 14, fontWeight: 600, color: '#4ade80', margin: '0 0 4px' }}>
+                            {fileCount} souborů přijato ke zpracování
+                        </p>
+                        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+                            Server stahuje soubory z {cloudSource} na pozadí. Jakmile bude zpracování hotové, pošleme vám email. <strong style={{ color: 'var(--text-secondary)' }}>Můžete tuto stránku zavřít.</strong>
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {/* Chyba */}
+            {cloudState === 'error' && (
+                <div style={{ margin: '1rem 0', padding: '1rem 1.25rem', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 10, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <span style={{ fontSize: 20, flexShrink: 0 }}>✗</span>
+                    <div>
+                        <p style={{ fontSize: 14, fontWeight: 600, color: '#ef4444', margin: '0 0 4px' }}>Nepodařilo se odeslat soubory</p>
+                        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 8px' }}>{errorMsg}</p>
+                        <button onClick={() => setCloudState('idle')} className="btn" style={{ fontSize: 12, padding: '4px 12px' }}>
+                            Zkusit znovu
+                        </button>
+                    </div>
                 </div>
             )}
         </>

@@ -87,6 +87,18 @@ export default function ImageUploader() {
     }
   }, []);
 
+  // ── Varování před zavřením stránky během aktivního uploadu ───────────────
+  useEffect(() => {
+    const isUploading = photos.some(p => p.status === 'uploading');
+    if (!isUploading) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [photos]);
+
   const isProcessing = photos.some(
     p => p.status === 'waiting' || p.status === 'uploading' || p.status === 'processing'
   );
@@ -226,15 +238,11 @@ export default function ImageUploader() {
         }),
       });
 
-      // ── Nepřihlášený uživatel — redirect na order page ────────────────────
       if (!user) {
         onOrderReady?.(order_id);
         return;
       }
 
-      // ── Přihlášený uživatel — webhook + email, uživatel může odejít ───────
-      // Nepollujeme — DB a email obstarává webhook handler na Railway.
-      // Uživatel najde výsledky v dashboardu.
       items.forEach(it => updatePhoto(it.id, { status: 'processing', progress: 50 }));
 
     } catch (err) {
@@ -454,7 +462,11 @@ export default function ImageUploader() {
         </label>
 
         <div>
-          <CloudPicker onFiles={(files) => { if (!isProcessing) addFiles(files); }} />
+          <CloudPicker
+            onFiles={(files) => { if (!isProcessing) addFiles(files); }}
+            settings={settings}
+            hdrMode={settings.hdr_mode}
+          />
         </div>
 
         {showHdrProgress && (
@@ -533,7 +545,6 @@ export default function ImageUploader() {
                             </button>
                           </div>
                         ) : photo.status === 'processing' ? (
-                          // ── Přihlášený uživatel: HDR zpracovává webhook, odkazujeme na dashboard ──
                           <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
                             Pošleme email až bude hotovo —{' '}
                             <a href="/dashboard" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
