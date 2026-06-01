@@ -267,60 +267,41 @@ router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => 
 });
 
 // ── Cloud Import (Dropbox / Google Drive → server-to-server) ─────────────────
-// Frontend pošle pouze metadata — backend stáhne soubory přímo ze serverů.
-// Pro HDR: vytvoří order synchronně a vrátí order_id v response,
-//          aby nepřihlášený uživatel mohl být přesměrován na order page.
-// Pro non-HDR: odpovídá 202 okamžitě.
 router.post('/cloud-import', async (req: Request, res: Response) => {
   const {
-    source,
-    files,
-    access_token,
-    settings: rawSettings = {},
-    hdr_mode = false,
-    user_id = null,
-    session_id = null,
+    source, files, access_token,
+    settings: rawSettings = {}, hdr_mode = false,
+    user_id = null, session_id = null,
   } = req.body;
 
   if (!source || !files || !Array.isArray(files) || files.length === 0) {
-    res.status(400).json({ error: 'Chybí source nebo files' });
-    return;
+    res.status(400).json({ error: 'Chybí source nebo files' }); return;
   }
   if (source === 'google_drive' && !access_token) {
-    res.status(400).json({ error: 'Chybí access_token pro Google Drive' });
-    return;
+    res.status(400).json({ error: 'Chybí access_token pro Google Drive' }); return;
   }
 
-  // ── HDR: vytvoř order synchronně aby order_id šlo vrátit v response ─────
-  // Nepřihlášený uživatel bude přesměrován na /order/hdr_pending_XXX
   let hdr_order_id: string | null = null;
   if (hdr_mode) {
     try {
       const orderRes = await axios.post(`${API_BASE}/v3/orders/`, {},
         { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
       hdr_order_id = orderRes.data.order_id;
-
       await supabase.from('orders').insert({
         image_id: `hdr_pending_${hdr_order_id}`,
         filename: files[0]?.name ?? null,
-        payment_status: 'pending',
-        amount_czk: PRICE_CZK,
-        user_id: user_id || null,
-        session_id: session_id || null,
-        hdr_order_id,
-        payment_session_id: `pending_hdr_${hdr_order_id}`,
+        payment_status: 'pending', amount_czk: PRICE_CZK,
+        user_id: user_id || null, session_id: session_id || null,
+        hdr_order_id, payment_session_id: `pending_hdr_${hdr_order_id}`,
       });
     } catch (err) {
       console.error('[cloud-import] Chyba při vytváření HDR orderu:', err);
-      res.status(500).json({ error: 'Nepodařilo se vytvořit order' });
-      return;
+      res.status(500).json({ error: 'Nepodařilo se vytvořit order' }); return;
     }
   }
 
-  // Odpověz s order_id — frontend použije pro redirect nepřihlášeného uživatele
   res.status(202).json({ ok: true, order_id: hdr_order_id, message: 'Přijato ke zpracování' });
 
-  // ── Zpracování na pozadí ──────────────────────────────────────────────────
   (async () => {
     try {
       const downloadFile = async (file: { url?: string; id?: string; name: string; mimeType?: string }): Promise<Buffer> => {
@@ -338,11 +319,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
       };
 
       if (hdr_mode && hdr_order_id) {
-        // ── HDR flow — order a DB insert již hotovy, nahraj brackety ─────────
-        // FIX (Chyba 4): retry 3× pro každý bracket — zabrání situaci kdy
-        // Autoenhance dostane méně bracketů než očekáváno (výsledek: 1 fotka místo N).
+        // HDR: retry 3× pro každý bracket
         const order_id = hdr_order_id;
-
         for (const file of files) {
           let success = false;
           for (let attempt = 0; attempt < 3 && !success; attempt++) {
@@ -368,7 +346,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           }
           if (!success) console.error(`[cloud-import] Bracket ${file.name} se nepodařilo nahrát po 3 pokusech`);
         }
-
         const mergeBody: Record<string, unknown> = {
           hdr: true, ai_version: '5.x', enhance: true,
           enhance_type: rawSettings.enhance_type ?? 'neutral',
@@ -377,41 +354,23 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           vertical_correction: rawSettings.vertical_correction ?? true,
           lens_correction: rawSettings.lens_correction ?? true,
           window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-          upscale: rawSettings.upscale ?? false,
-          privacy: rawSettings.privacy ?? false,
+          upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
         };
         await axios.post(`${API_BASE}/v3/orders/${order_id}/process`, mergeBody,
           { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
-
         console.log(`[cloud-import] HDR order ${order_id} spuštěn, ${files.length} bracketů`);
 
       } else if (!hdr_mode) {
-        // ── Non-HDR flow ──────────────────────────────────────────────────
-        // FIX (Chyba 2): vytvoř VŠECHNY Autoenhance images a DB řádky PŘEDEM,
-        // pak teprve stahuj a uploaduj data. Tím je upload_batch_id kompletní
-        // v DB dřív než dorazí první webhook → batch email logika funguje správně
-        // a nepřijde N emailů (jeden za každou fotku).
+        // Non-HDR: vytvoř VŠECHNY DB řádky PŘEDEM → webhook vidí kompletní batch → 1 email
         const upload_batch_id = randomUUID();
-
-        // Krok A: filtruj podporované formáty
         const validFiles = (files as { name: string; url?: string; id?: string; mimeType?: string }[]).filter(f => {
           const ext = path.extname(f.name).toLowerCase().replace('.', '');
-          if (!ALLOWED_EXTENSIONS.has(ext)) {
-            console.warn(`[cloud-import] Přeskočen nepodporovaný formát: ${f.name}`);
-            return false;
-          }
+          if (!ALLOWED_EXTENSIONS.has(ext)) { console.warn(`[cloud-import] Přeskočen: ${f.name}`); return false; }
           return true;
         });
+        if (validFiles.length === 0) { console.warn('[cloud-import] Non-HDR: žádné podporované soubory'); return; }
 
-        if (validFiles.length === 0) {
-          console.warn('[cloud-import] Non-HDR: žádné podporované soubory');
-          return;
-        }
-
-        // Krok B: vytvoř Autoenhance image + DB řádek pro KAŽDÝ soubor najednou PŘEDEM
-        // (před stahováním dat) — tím je batch kompletní v DB od začátku
         const prepared: { image_id: string; upload_url: string; correctMime: string; file: typeof validFiles[0] }[] = [];
-
         for (const file of validFiles) {
           try {
             const ext = path.extname(file.name).toLowerCase().replace('.', '');
@@ -424,28 +383,20 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               vertical_correction: rawSettings.vertical_correction ?? true,
               lens_correction: rawSettings.lens_correction ?? true,
               window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-              upscale: rawSettings.upscale ?? false,
-              privacy: rawSettings.privacy ?? false,
+              upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
             }, { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
-
             const { image_id, s3PutObjectUrl: upload_url } = createRes.data;
-
-            // DB insert předem — webhook uvidí kompletní batch
             await supabase.from('orders').insert({
               image_id, filename: file.name, payment_status: 'pending',
               amount_czk: PRICE_CZK, user_id: user_id || null, session_id: session_id || null,
               payment_session_id: `pending_${image_id}`, upload_batch_id,
             });
-
             prepared.push({ image_id, upload_url, correctMime, file });
           } catch (createErr) {
             console.error(`[cloud-import] Chyba při vytváření image pro ${file.name}:`, createErr);
           }
         }
-
         console.log(`[cloud-import] Non-HDR: vytvořeno ${prepared.length}/${validFiles.length} DB řádků (batch ${upload_batch_id})`);
-
-        // Krok C: teď stahuj data ze zdroje a uploaduj na S3
         for (const item of prepared) {
           try {
             const buffer = await downloadFile(item.file);
@@ -457,12 +408,9 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             console.error(`[cloud-import] Chyba při uploadu ${item.file.name}:`, uploadErr);
           }
         }
-
         console.log(`[cloud-import] Non-HDR batch ${upload_batch_id} dokončen, ${prepared.length} souborů`);
       }
-    } catch (err) {
-      console.error('[cloud-import] Fatální chyba:', err);
-    }
+    } catch (err) { console.error('[cloud-import] Fatální chyba:', err); }
   })();
 });
 
@@ -510,33 +458,68 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
     if (event !== 'image_processed' || error) return;
 
     let order = null;
-    const { data: directOrder } = await supabase.from('orders').select('*').eq('image_id', image_id).single();
+
+    // ── 1. Non-HDR: přímý lookup přes image_id ───────────────────────────────
+    // maybeSingle() místo single() — single() by hodilo chybu pokud by náhodou
+    // existovaly duplicity, maybeSingle() vrátí null bezpečně.
+    const { data: directOrder } = await supabase
+      .from('orders').select('*').eq('image_id', image_id).maybeSingle();
     if (directOrder) order = directOrder;
 
+    // ── 2. HDR: lookup přes hdr_order_id ─────────────────────────────────────
     if (!order && order_id && !order_is_processing) {
-      const { data: hdrOrder } = await supabase.from('orders').select('*').eq('hdr_order_id', order_id).single();
-      if (hdrOrder) {
-        if (hdrOrder.image_id === `hdr_pending_${order_id}`) {
-          await supabase.from('orders').update({ image_id }).eq('hdr_order_id', order_id);
-          order = { ...hdrOrder, image_id };
+      // KRITICKÁ OPRAVA: původní .single() selhávalo jakmile vznikly 2+ řádky
+      // se stejným hdr_order_id (po prvním webhooku se insertuje druhý řádek →
+      // .single() vrátí chybu místo dat → handler tiše skipoval všechny další
+      // webhooky → v dashboardu vždy jen 1 fotka místo N).
+      //
+      // Oprava: načti VŠECHNY řádky seřazené dle created_at, pak:
+      //   pendingRow = řádek s hdr_pending_ prefixem (existuje jen pro 1. webhook)
+      //   metaRow    = nejstarší řádek = zdroj metadat (user_id, session_id, filename)
+      const { data: hdrOrders } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('hdr_order_id', order_id)
+        .order('created_at', { ascending: true });
+
+      const pendingRow = (hdrOrders ?? []).find((o: any) => o.image_id === `hdr_pending_${order_id}`);
+      const metaRow = (hdrOrders ?? [])[0] ?? null;
+
+      if (metaRow) {
+        if (pendingRow) {
+          // První webhook: aktualizuj hdr_pending_ řádek na reálné image_id.
+          // Cílíme přes pendingRow.id (ne eq hdr_order_id) aby se nechtěně
+          // nepřepsaly další řádky které již mají reálné image_id.
+          await supabase.from('orders').update({ image_id }).eq('id', pendingRow.id);
+          order = { ...pendingRow, image_id };
         } else {
-          const { data: existingResult } = await supabase.from('orders').select('id').eq('image_id', image_id).single();
+          // Další webhooky (2., 3., … N.): každý výsledek = nový řádek v DB.
+          // maybeSingle() místo single() — bezpečné pokud by duplicita existovala.
+          const { data: existingResult } = await supabase
+            .from('orders').select('id').eq('image_id', image_id).maybeSingle();
           if (!existingResult) {
             await supabase.from('orders').insert({
-              image_id, filename: hdrOrder.filename, payment_status: 'pending',
-              amount_czk: PRICE_CZK, user_id: hdrOrder.user_id, session_id: hdrOrder.session_id,
-              hdr_order_id: order_id, payment_session_id: `pending_${image_id}`,
-              upload_batch_id: hdrOrder.upload_batch_id,
+              image_id,
+              filename: metaRow.filename,
+              payment_status: 'pending',
+              amount_czk: PRICE_CZK,
+              user_id: metaRow.user_id,
+              session_id: metaRow.session_id,
+              hdr_order_id: order_id,
+              payment_session_id: `pending_${image_id}`,
+              upload_batch_id: metaRow.upload_batch_id,
             });
           }
-          order = { ...hdrOrder, image_id };
+          order = { ...metaRow, image_id };
         }
       }
     }
 
     if (!order) return;
 
+    // ── 3. Email notifikace ───────────────────────────────────────────────────
     if (order.user_id && order_id) {
+      // HDR: pošli email až když jsou VŠECHNY výsledky zpracovány
       try {
         const autoenhanceRes = await axios.get(`${API_BASE}/v3/orders/${order_id}`, { headers: { 'x-api-key': API_KEY } });
         const totalImages = (autoenhanceRes.data.images ?? []).length;
@@ -558,8 +541,10 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
     }
 
     if (order.user_id) {
+      // Non-HDR: batch email pokud všechny hotovy, jinak single
       if (order.upload_batch_id) {
-        const { data: batchOrders } = await supabase.from('orders').select('image_id').eq('upload_batch_id', order.upload_batch_id);
+        const { data: batchOrders } = await supabase
+          .from('orders').select('image_id').eq('upload_batch_id', order.upload_batch_id);
         if (batchOrders && batchOrders.length > 1) {
           const statuses = await Promise.allSettled(
             batchOrders.map(async (o) => {
@@ -603,7 +588,9 @@ router.post('/notify', async (req: Request, res: Response) => {
   try {
     const { user_id, filename, image_id, upload_batch_id } = req.body;
     if (!user_id || !image_id) { res.status(400).json({ error: 'Chybí user_id nebo image_id' }); return; }
-    const { data: existing } = await supabase.from('orders').select('id').eq('image_id', image_id).single();
+    // maybeSingle() místo single() — single() by hodilo chybu při duplicitách
+    const { data: existing } = await supabase
+      .from('orders').select('id').eq('image_id', image_id).maybeSingle();
     if (!existing) {
       await supabase.from('orders').insert({
         image_id, filename: filename && !filename.includes(image_id) ? filename : null,
