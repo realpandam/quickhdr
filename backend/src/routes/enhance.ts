@@ -268,7 +268,9 @@ router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => 
 
 // ── Cloud Import (Dropbox / Google Drive → server-to-server) ─────────────────
 // Frontend pošle pouze metadata — backend stáhne soubory přímo ze serverů.
-// Odpovídá 202 okamžitě, uživatel může zavřít stránku.
+// Pro HDR: vytvoří order synchronně a vrátí order_id v response,
+//          aby nepřihlášený uživatel mohl být přesměrován na order page.
+// Pro non-HDR: odpovídá 202 okamžitě.
 router.post('/cloud-import', async (req: Request, res: Response) => {
   const {
     source,
@@ -289,8 +291,34 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
     return;
   }
 
-  // Okamžitě odpověz — uživatel může odejít
-  res.status(202).json({ ok: true, message: 'Přijato ke zpracování' });
+  // ── HDR: vytvoř order synchronně aby order_id šlo vrátit v response ─────
+  // Nepřihlášený uživatel bude přesměrován na /order/hdr_pending_XXX
+  let hdr_order_id: string | null = null;
+  if (hdr_mode) {
+    try {
+      const orderRes = await axios.post(`${API_BASE}/v3/orders/`, {},
+        { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+      hdr_order_id = orderRes.data.order_id;
+
+      await supabase.from('orders').insert({
+        image_id: `hdr_pending_${hdr_order_id}`,
+        filename: files[0]?.name ?? null,
+        payment_status: 'pending',
+        amount_czk: PRICE_CZK,
+        user_id: user_id || null,
+        session_id: session_id || null,
+        hdr_order_id,
+        payment_session_id: `pending_hdr_${hdr_order_id}`,
+      });
+    } catch (err) {
+      console.error('[cloud-import] Chyba při vytváření HDR orderu:', err);
+      res.status(500).json({ error: 'Nepodařilo se vytvořit order' });
+      return;
+    }
+  }
+
+  // Odpověz s order_id — frontend použije pro redirect nepřihlášeného uživatele
+  res.status(202).json({ ok: true, order_id: hdr_order_id, message: 'Přijato ke zpracování' });
 
   // ── Zpracování na pozadí ──────────────────────────────────────────────────
   (async () => {
@@ -309,19 +337,9 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         }
       };
 
-      if (hdr_mode) {
-        // ── HDR flow ──────────────────────────────────────────────────────
-        const orderRes = await axios.post(`${API_BASE}/v3/orders/`, {},
-          { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
-        const order_id = orderRes.data.order_id;
-
-        await supabase.from('orders').insert({
-          image_id: `hdr_pending_${order_id}`,
-          filename: files[0]?.name ?? null,
-          payment_status: 'pending', amount_czk: PRICE_CZK,
-          user_id: user_id || null, session_id: session_id || null,
-          hdr_order_id: order_id, payment_session_id: `pending_hdr_${order_id}`,
-        });
+      if (hdr_mode && hdr_order_id) {
+        // ── HDR flow — order a DB insert již hotovy, nahraj brackety ─────────
+        const order_id = hdr_order_id;
 
         for (const file of files) {
           try {
@@ -351,14 +369,15 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           vertical_correction: rawSettings.vertical_correction ?? true,
           lens_correction: rawSettings.lens_correction ?? true,
           window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-          upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+          upscale: rawSettings.upscale ?? false,
+          privacy: rawSettings.privacy ?? false,
         };
         await axios.post(`${API_BASE}/v3/orders/${order_id}/process`, mergeBody,
           { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
 
         console.log(`[cloud-import] HDR order ${order_id} spuštěn, ${files.length} bracketů`);
 
-      } else {
+      } else if (!hdr_mode) {
         // ── Non-HDR flow ──────────────────────────────────────────────────
         const upload_batch_id = randomUUID();
 
@@ -379,7 +398,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               vertical_correction: rawSettings.vertical_correction ?? true,
               lens_correction: rawSettings.lens_correction ?? true,
               window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-              upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+              upscale: rawSettings.upscale ?? false,
+              privacy: rawSettings.privacy ?? false,
             }, { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
             const { image_id, s3PutObjectUrl: upload_url } = createRes.data;
             const urlParams = new URL(upload_url);

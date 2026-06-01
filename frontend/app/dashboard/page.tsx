@@ -177,7 +177,7 @@ export default function DashboardPage() {
 
   const toggleSelectAll = (group: BatchGroup, e: React.MouseEvent) => {
     e.stopPropagation();
-    const groupIds = group.orders.filter(o => new Date(o.expires_at) > new Date()).map(o => o.id);
+    const groupIds = group.orders.filter(o => new Date(o.expires_at) > new Date() && !isHdrPending(o.image_id)).map(o => o.id);
     const allSelected = groupIds.every(id => selectedOrders.has(id));
     setSelectedOrders(prev => {
       const next = new Set(prev);
@@ -215,7 +215,7 @@ export default function DashboardPage() {
   const getSelectedOrderObjects = () => orders.filter(o => selectedOrders.has(o.id));
 
   const selectedPaid = getSelectedOrderObjects().filter(o => o.payment_status === 'paid' && new Date(o.expires_at) > new Date());
-  const selectedPending = getSelectedOrderObjects().filter(o => o.payment_status !== 'paid' && new Date(o.expires_at) > new Date());
+  const selectedPending = getSelectedOrderObjects().filter(o => o.payment_status !== 'paid' && new Date(o.expires_at) > new Date() && !isHdrPending(o.image_id));
 
   const handleBuySelected = async () => {
     if (!user || selectedPending.length === 0) return;
@@ -518,7 +518,7 @@ export default function DashboardPage() {
                       onMouseLeave={e => { if (!isEditing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)'; }}
                     >
                       {/* Select all checkbox */}
-                      {!batchExpired && activeOrders.length > 0 && (
+                      {!batchExpired && activeOrders.filter(o => !isHdrPending(o.image_id)).length > 0 && (
                         <div
                           onClick={e => toggleSelectAll(group, e)}
                           style={{
@@ -663,7 +663,7 @@ export default function DashboardPage() {
                                 animation: isOpen ? `fadeInPhoto 0.3s ease ${oIdx * 0.03}s both` : 'none',
                                 position: 'relative' as const,
                               }}>
-                                {!expired && (
+                                {!expired && !pending && (
                                   <div
                                     onClick={e => toggleOrder(order.id, e)}
                                     style={{
@@ -682,6 +682,7 @@ export default function DashboardPage() {
 
                                 {/* ── Thumbnail: hdr_pending zobrazí placeholder místo broken image ── */}
                                 <div
+                                  title={pending ? undefined : 'Klikněte pro přiblížení'}
                                   onClick={() => !pending && openLightbox(group.orders, oIdx)}
                                   style={{
                                     position: 'relative' as const, width: '100%', paddingBottom: '75%',
@@ -764,7 +765,6 @@ export default function DashboardPage() {
                                       )}
                                     </div>
                                   ) : pending ? (
-                                    // hdr_pending — zobraz jen info, žádné akce
                                     <span style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
                                       Čeká na dokončení zpracování
                                     </span>
@@ -773,7 +773,8 @@ export default function DashboardPage() {
                                       Koupit
                                     </button>
                                   ) : null}
-                                  {(expired || order.payment_status === 'pending') && (
+                                  {/* Smazat — skryj pro pending HDR, povoleno pouze pro expired nebo zaplacené pending */}
+                                  {!pending && (expired || order.payment_status === 'pending') && (
                                     <button onClick={() => handleDelete(order.id)} style={{ padding: '6px 8px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}>
                                       🗑
                                     </button>

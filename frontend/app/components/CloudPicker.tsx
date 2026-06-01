@@ -90,6 +90,23 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
             });
 
             if (res.status === 202) {
+                const data = await res.json();
+
+                if (!user && hdrMode && data.order_id) {
+                    // ── Nepřihlášený uživatel v HDR módu → redirect na order page ──
+                    window.location.href = `/order/hdr_pending_${data.order_id}`;
+                    return;
+                }
+
+                if (!user && !hdrMode && data.upload_batch_id) {
+                    // ── Nepřihlášený uživatel v non-HDR módu → redirect na první image ──
+                    // (pro non-HDR cloud import není order page relevantní,
+                    //  ale zachováme konzistenci — zobrazíme accepted stav)
+                    setCloudState('accepted');
+                    return;
+                }
+
+                // ── Přihlášený uživatel → zobraz "Můžete zavřít stránku" ──
                 setCloudState('accepted');
             } else {
                 const data = await res.json().catch(() => ({}));
@@ -226,7 +243,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 </div>
             )}
 
-            {/* Přijato — uživatel může odejít */}
+            {/* Přijato — přihlášený uživatel může odejít */}
             {cloudState === 'accepted' && (
                 <div style={{ margin: '1rem 0', padding: '1rem 1.25rem', background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 10, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                     <span style={{ fontSize: 20, flexShrink: 0 }}>✓</span>
