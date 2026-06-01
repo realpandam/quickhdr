@@ -1,7 +1,7 @@
 'use client';
 
 import type { User } from '@supabase/supabase-js';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Header from '../components/Header';
 import { API_URL } from '../lib/config';
 import { supabase } from '../lib/supabase';
@@ -45,13 +45,11 @@ const SEARCH_PLACEHOLDERS = [
 ];
 
 // ── Guard: hdr_pending image_id nemá ještě finální URL od Autoenhance ────────
-// Tyto ordery se zobrazí v UI, ale bez náhledu (ikona místo obrázku).
 const isHdrPending = (image_id: string) => image_id?.startsWith('hdr_pending_');
 
 function groupOrders(orders: Order[]): BatchGroup[] {
   const map = new Map<string, Order[]>();
   for (const order of orders) {
-    // HDR výsledky (stejný hdr_order_id) → jedna skupina v dashboardu
     const key = order.upload_batch_id
       ?? (order.hdr_order_id ? `hdr_${order.hdr_order_id}` : `single_${order.id}`);
     if (!map.has(key)) map.set(key, []);
@@ -67,6 +65,95 @@ function groupOrders(orders: Order[]): BatchGroup[] {
     const paidCount = orders.filter(o => o.payment_status === 'paid').length;
     return { batch_id, orders: sorted, name, created_at: sorted[0]?.created_at ?? '', isExpired, paidCount, totalCount: orders.length };
   }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+}
+
+// ── FIX Chyba 1 + 3: DashboardThumb — jednotný spinner pro HDR i non-HDR ─────
+// Stav loaded/error se propaguje ven přes onLoaded callback, aby parent
+// mohl rozlišit „zpracovává se" od „hotová" pro disable logiku (Chyba 3).
+function DashboardThumb({
+  imageId,
+  filename,
+  pending,
+  isSelected,
+  onClick,
+  onLoaded,
+}: {
+  imageId: string;
+  filename: string;
+  pending: boolean;      // hdr_pending_ — webhook ještě nepřišel
+  isSelected: boolean;
+  onClick: () => void;
+  onLoaded: (imageId: string) => void;
+}) {
+  const [imgState, setImgState] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [retryKey, setRetryKey] = useState(0);
+
+  // Auto-retry po 8 s pokud obrázek ještě není zpracovaný
+  useEffect(() => {
+    if (pending || imgState !== 'error') return;
+    const t = setTimeout(() => {
+      setImgState('loading');
+      setRetryKey(k => k + 1);
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [imgState, pending]);
+
+  const showSpinner = pending || imgState === 'loading' || imgState === 'error';
+  const isClickable = !pending && imgState === 'loaded';
+
+  return (
+    <div
+      onClick={() => { if (isClickable) onClick(); }}
+      title={isClickable ? 'Klikněte pro přiblížení' : undefined}
+      style={{
+        position: 'relative', width: '100%', paddingBottom: '75%',
+        background: 'var(--bg-secondary)',
+        cursor: isClickable ? 'zoom-in' : 'default',
+        overflow: 'hidden', borderRadius: 7, marginBottom: 8,
+        outline: isSelected ? '2px solid #7B5CF0' : 'none',
+        outlineOffset: '-2px', transition: 'outline 0.15s ease',
+      }}
+    >
+      {/* Spinner — jednotný pro HDR i non-HDR ve zpracování */}
+      {showSpinner && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}>
+          <div style={{
+            width: 26, height: 26,
+            border: '3px solid var(--border)',
+            borderTop: '3px solid var(--accent)',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+          }} />
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', padding: '0 8px', lineHeight: 1.4 }}>
+            Zpracovává se…
+          </span>
+        </div>
+      )}
+
+      {/* Obrázek — jen pro non-pending; opacity 0 dokud se nenačte */}
+      {!pending && (
+        <img
+          key={retryKey}
+          src={`${API_URL}/api/enhance/enhanced/${imageId}?preview=true&quality=60`}
+          alt={filename}
+          onLoad={() => { setImgState('loaded'); onLoaded(imageId); }}
+          onError={() => setImgState('error')}
+          style={{
+            position: 'absolute', inset: 0, width: '100%', height: '100%',
+            objectFit: 'cover',
+            opacity: imgState === 'loaded' ? 1 : 0,
+            transition: 'opacity 0.3s ease, transform 0.3s ease',
+          }}
+          onMouseEnter={e => { if (imgState === 'loaded') (e.target as HTMLImageElement).style.transform = 'scale(1.05)'; }}
+          onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
+        />
+      )}
+    </div>
+  );
 }
 
 export default function DashboardPage() {
@@ -85,6 +172,16 @@ export default function DashboardPage() {
   const [editingBatch, setEditingBatch] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // FIX Chyba 3: sleduj které obrázky se úspěšně načetly (= zpracované)
+  // Fotky bez záznamu v loadedImages jsou stále ve zpracování → disable akce
+  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
+  const markLoaded = useCallback((imageId: string) => {
+    setLoadedImages(prev => {
+      if (prev.has(imageId)) return prev;
+      const next = new Set(prev); next.add(imageId); return next;
+    });
+  }, []);
 
   const [placeholderText, setPlaceholderText] = useState('');
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
@@ -151,7 +248,6 @@ export default function DashboardPage() {
   }, [lightbox]);
 
   const openLightbox = (orders: Order[], index: number) => {
-    // Nepouštět lightbox pro hdr_pending — nemá co zobrazit
     if (isHdrPending(orders[index]?.image_id)) return;
     setLightbox({ orders, index });
   };
@@ -177,7 +273,12 @@ export default function DashboardPage() {
 
   const toggleSelectAll = (group: BatchGroup, e: React.MouseEvent) => {
     e.stopPropagation();
-    const groupIds = group.orders.filter(o => new Date(o.expires_at) > new Date() && !isHdrPending(o.image_id)).map(o => o.id);
+    // FIX Chyba 3: vybírej jen načtené (hotové) a non-pending fotky
+    const groupIds = group.orders
+      .filter(o => new Date(o.expires_at) > new Date()
+        && !isHdrPending(o.image_id)
+        && loadedImages.has(o.image_id))
+      .map(o => o.id);
     const allSelected = groupIds.every(id => selectedOrders.has(id));
     setSelectedOrders(prev => {
       const next = new Set(prev);
@@ -215,7 +316,13 @@ export default function DashboardPage() {
   const getSelectedOrderObjects = () => orders.filter(o => selectedOrders.has(o.id));
 
   const selectedPaid = getSelectedOrderObjects().filter(o => o.payment_status === 'paid' && new Date(o.expires_at) > new Date());
-  const selectedPending = getSelectedOrderObjects().filter(o => o.payment_status !== 'paid' && new Date(o.expires_at) > new Date() && !isHdrPending(o.image_id));
+  // FIX Chyba 3: vyloučit pending (zpracovávají se) z výběru ke koupi
+  const selectedPending = getSelectedOrderObjects().filter(o =>
+    o.payment_status !== 'paid'
+    && new Date(o.expires_at) > new Date()
+    && !isHdrPending(o.image_id)
+    && loadedImages.has(o.image_id)
+  );
 
   const handleBuySelected = async () => {
     if (!user || selectedPending.length === 0) return;
@@ -489,8 +596,10 @@ export default function DashboardPage() {
                 const allPaid = group.paidCount === group.totalCount;
                 const isSingle = group.totalCount === 1;
                 const activeOrders = group.orders.filter(o => new Date(o.expires_at) > new Date());
-                const allGroupSelected = activeOrders.length > 0 && activeOrders.every(o => selectedOrders.has(o.id));
-                const someGroupSelected = activeOrders.some(o => selectedOrders.has(o.id));
+                // FIX Chyba 3: select-all checkbox jen pro hotové fotky
+                const selectableOrders = activeOrders.filter(o => !isHdrPending(o.image_id) && loadedImages.has(o.image_id));
+                const allGroupSelected = selectableOrders.length > 0 && selectableOrders.every(o => selectedOrders.has(o.id));
+                const someGroupSelected = selectableOrders.some(o => selectedOrders.has(o.id));
                 const isEditing = editingBatch === group.batch_id;
 
                 return (
@@ -517,8 +626,8 @@ export default function DashboardPage() {
                       onMouseEnter={e => { if (!isEditing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.06)' : 'var(--bg-secondary)'; }}
                       onMouseLeave={e => { if (!isEditing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)'; }}
                     >
-                      {/* Select all checkbox */}
-                      {!batchExpired && activeOrders.filter(o => !isHdrPending(o.image_id)).length > 0 && (
+                      {/* Select all checkbox — jen pokud existují selektovatelné fotky */}
+                      {!batchExpired && selectableOrders.length > 0 && (
                         <div
                           onClick={e => toggleSelectAll(group, e)}
                           style={{
@@ -653,8 +762,10 @@ export default function DashboardPage() {
                             const isPaid = order.payment_status === 'paid';
                             const countdown = getCountdown(order.expires_at);
                             const isSelected = selectedOrders.has(order.id);
-                            // ── Guard: hdr_pending nemá ještě finální image_id ──
                             const pending = isHdrPending(order.image_id);
+                            // FIX Chyba 3: fotka se zpracovává pokud je pending HDR,
+                            // nebo pokud ještě nebyla úspěšně načtena (non-HDR ve zpracování)
+                            const isProcessing = pending || (!isPaid && !expired && !loadedImages.has(order.image_id));
 
                             return (
                               <div key={order.id} style={{
@@ -663,7 +774,8 @@ export default function DashboardPage() {
                                 animation: isOpen ? `fadeInPhoto 0.3s ease ${oIdx * 0.03}s both` : 'none',
                                 position: 'relative' as const,
                               }}>
-                                {!expired && !pending && (
+                                {/* Checkbox — jen pro hotové fotky (ne zpracovávající se) */}
+                                {!expired && !isProcessing && (
                                   <div
                                     onClick={e => toggleOrder(order.id, e)}
                                     style={{
@@ -680,44 +792,19 @@ export default function DashboardPage() {
                                   </div>
                                 )}
 
-                                {/* ── Thumbnail: hdr_pending zobrazí placeholder místo broken image ── */}
-                                <div
-                                  title={pending ? undefined : 'Klikněte pro přiblížení'}
-                                  onClick={() => !pending && openLightbox(group.orders, oIdx)}
-                                  style={{
-                                    position: 'relative' as const, width: '100%', paddingBottom: '75%',
-                                    background: 'var(--bg-secondary)',
-                                    cursor: pending ? 'default' : 'zoom-in',
-                                    overflow: 'hidden', borderRadius: 7, marginBottom: 8,
-                                    outline: isSelected ? '2px solid #7B5CF0' : 'none',
-                                    outlineOffset: '-2px', transition: 'outline 0.15s ease',
-                                  }}
-                                >
-                                  {pending ? (
-                                    // Placeholder pro HDR ordery kde ještě nepřišel webhook
-                                    <div style={{
-                                      position: 'absolute' as const, inset: 0,
-                                      display: 'flex', flexDirection: 'column' as const,
-                                      alignItems: 'center', justifyContent: 'center',
-                                      gap: 6,
-                                    }}>
-                                      <span style={{ fontSize: 24, opacity: 0.4 }}>⏳</span>
-                                      <span style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' as const, padding: '0 8px', lineHeight: 1.4 }}>
-                                        HDR se zpracovává
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <img
-                                      src={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=true&quality=60`}
-                                      alt={order.filename}
-                                      style={{ position: 'absolute' as const, inset: 0, width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s ease' }}
-                                      onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.05)'; }}
-                                      onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
-                                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                    />
-                                  )}
-                                  {isPaid && !expired && !pending && (
-                                    <div style={{ position: 'absolute' as const, top: 5, right: 5, background: 'rgba(74,222,128,0.9)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, color: '#052e16' }}>✓</div>
+                                {/* FIX Chyba 1: DashboardThumb — jednotný spinner pro HDR i non-HDR */}
+                                <div style={{ position: 'relative' as const }}>
+                                  <DashboardThumb
+                                    imageId={order.image_id}
+                                    filename={order.filename}
+                                    pending={pending}
+                                    isSelected={isSelected}
+                                    onClick={() => openLightbox(group.orders, oIdx)}
+                                    onLoaded={markLoaded}
+                                  />
+                                  {/* Zaplaceno badge */}
+                                  {isPaid && !expired && !pending && loadedImages.has(order.image_id) && (
+                                    <div style={{ position: 'absolute' as const, top: 5, right: 5, background: 'rgba(74,222,128,0.9)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, color: '#052e16', zIndex: 1 }}>✓</div>
                                   )}
                                 </div>
 
@@ -732,7 +819,7 @@ export default function DashboardPage() {
                                 )}
 
                                 <div style={{ display: 'flex', gap: 5 }}>
-                                  {isPaid && !expired && !pending ? (
+                                  {isPaid && !expired && !isProcessing ? (
                                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                                       <a
                                         href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
@@ -764,7 +851,8 @@ export default function DashboardPage() {
                                         </a>
                                       )}
                                     </div>
-                                  ) : pending ? (
+                                  ) : isProcessing ? (
+                                    // FIX Chyba 3: zpracovávající se fotka — žádné akce
                                     <span style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
                                       Čeká na dokončení zpracování
                                     </span>
@@ -773,8 +861,8 @@ export default function DashboardPage() {
                                       Koupit
                                     </button>
                                   ) : null}
-                                  {/* Smazat — skryj pro pending HDR, povoleno pouze pro expired nebo zaplacené pending */}
-                                  {!pending && (expired || order.payment_status === 'pending') && (
+                                  {/* FIX Chyba 3: Smazat POUZE pro expired fotky, NIKDY pro zpracovávající se */}
+                                  {expired && !isProcessing && (
                                     <button onClick={() => handleDelete(order.id)} style={{ padding: '6px 8px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}>
                                       🗑
                                     </button>
@@ -828,7 +916,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Lightbox — hdr_pending zde nemůže nastat (openLightbox ho blokuje) */}
+      {/* Lightbox */}
       {lightbox && currentLightboxOrder && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.96)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(10px)', animation: 'fadeIn 0.2s ease' }}
@@ -901,6 +989,10 @@ export default function DashboardPage() {
         @keyframes fadeInPhoto {
           from { opacity: 0; transform: translateY(8px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
         .batch-card:hover {
           box-shadow: 0 4px 24px rgba(0,0,0,0.1);

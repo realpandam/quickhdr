@@ -339,26 +339,34 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
       if (hdr_mode && hdr_order_id) {
         // ── HDR flow — order a DB insert již hotovy, nahraj brackety ─────────
+        // FIX (Chyba 4): retry 3× pro každý bracket — zabrání situaci kdy
+        // Autoenhance dostane méně bracketů než očekáváno (výsledek: 1 fotka místo N).
         const order_id = hdr_order_id;
 
         for (const file of files) {
-          try {
-            const buffer = await downloadFile(file);
-            const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
-            const bracketRes = await axios.post(`${API_BASE}/v3/brackets/`,
-              { order_id, name: file.name },
-              { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
-            const upload_url = bracketRes.data.upload_url ?? bracketRes.data.s3PutObjectUrl;
-            if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
-            const urlParams = new URL(upload_url);
-            const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
-            await axios.put(upload_url, buffer, {
-              headers: { 'Content-Type': contentTypeFromUrl },
-              maxBodyLength: Infinity, maxContentLength: Infinity,
-            });
-          } catch (fileErr) {
-            console.error(`[cloud-import] Chyba při uploadu bracketu ${file.name}:`, fileErr);
+          let success = false;
+          for (let attempt = 0; attempt < 3 && !success; attempt++) {
+            try {
+              const buffer = await downloadFile(file);
+              const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
+              const bracketRes = await axios.post(`${API_BASE}/v3/brackets/`,
+                { order_id, name: file.name },
+                { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+              const upload_url = bracketRes.data.upload_url ?? bracketRes.data.s3PutObjectUrl;
+              if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
+              const urlParams = new URL(upload_url);
+              const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
+              await axios.put(upload_url, buffer, {
+                headers: { 'Content-Type': contentTypeFromUrl },
+                maxBodyLength: Infinity, maxContentLength: Infinity,
+              });
+              success = true;
+            } catch (fileErr) {
+              console.error(`[cloud-import] Bracket ${file.name} pokus ${attempt + 1} selhal:`, fileErr);
+              if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+            }
           }
+          if (!success) console.error(`[cloud-import] Bracket ${file.name} se nepodařilo nahrát po 3 pokusech`);
         }
 
         const mergeBody: Record<string, unknown> = {
@@ -379,16 +387,34 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
       } else if (!hdr_mode) {
         // ── Non-HDR flow ──────────────────────────────────────────────────
+        // FIX (Chyba 2): vytvoř VŠECHNY Autoenhance images a DB řádky PŘEDEM,
+        // pak teprve stahuj a uploaduj data. Tím je upload_batch_id kompletní
+        // v DB dřív než dorazí první webhook → batch email logika funguje správně
+        // a nepřijde N emailů (jeden za každou fotku).
         const upload_batch_id = randomUUID();
 
-        for (const file of files) {
+        // Krok A: filtruj podporované formáty
+        const validFiles = (files as { name: string; url?: string; id?: string; mimeType?: string }[]).filter(f => {
+          const ext = path.extname(f.name).toLowerCase().replace('.', '');
+          if (!ALLOWED_EXTENSIONS.has(ext)) {
+            console.warn(`[cloud-import] Přeskočen nepodporovaný formát: ${f.name}`);
+            return false;
+          }
+          return true;
+        });
+
+        if (validFiles.length === 0) {
+          console.warn('[cloud-import] Non-HDR: žádné podporované soubory');
+          return;
+        }
+
+        // Krok B: vytvoř Autoenhance image + DB řádek pro KAŽDÝ soubor najednou PŘEDEM
+        // (před stahováním dat) — tím je batch kompletní v DB od začátku
+        const prepared: { image_id: string; upload_url: string; correctMime: string; file: typeof validFiles[0] }[] = [];
+
+        for (const file of validFiles) {
           try {
             const ext = path.extname(file.name).toLowerCase().replace('.', '');
-            if (!ALLOWED_EXTENSIONS.has(ext)) {
-              console.warn(`[cloud-import] Přeskočen nepodporovaný formát: ${file.name}`);
-              continue;
-            }
-            const buffer = await downloadFile(file);
             const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
             const createRes = await axios.post(`${API_BASE}/v3/images/`, {
               image_name: file.name, image_type: ext, ai_version: '5.x', enhance: true,
@@ -401,21 +427,38 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               upscale: rawSettings.upscale ?? false,
               privacy: rawSettings.privacy ?? false,
             }, { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+
             const { image_id, s3PutObjectUrl: upload_url } = createRes.data;
-            const urlParams = new URL(upload_url);
-            const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
-            await axios.put(upload_url, buffer, { headers: { 'Content-Type': contentTypeFromUrl } });
+
+            // DB insert předem — webhook uvidí kompletní batch
             await supabase.from('orders').insert({
               image_id, filename: file.name, payment_status: 'pending',
               amount_czk: PRICE_CZK, user_id: user_id || null, session_id: session_id || null,
               payment_session_id: `pending_${image_id}`, upload_batch_id,
             });
-            console.log(`[cloud-import] Uploadnut ${file.name} → ${image_id}`);
-          } catch (fileErr) {
-            console.error(`[cloud-import] Chyba při zpracování ${file.name}:`, fileErr);
+
+            prepared.push({ image_id, upload_url, correctMime, file });
+          } catch (createErr) {
+            console.error(`[cloud-import] Chyba při vytváření image pro ${file.name}:`, createErr);
           }
         }
-        console.log(`[cloud-import] Non-HDR batch dokončen, ${files.length} souborů`);
+
+        console.log(`[cloud-import] Non-HDR: vytvořeno ${prepared.length}/${validFiles.length} DB řádků (batch ${upload_batch_id})`);
+
+        // Krok C: teď stahuj data ze zdroje a uploaduj na S3
+        for (const item of prepared) {
+          try {
+            const buffer = await downloadFile(item.file);
+            const urlParams = new URL(item.upload_url);
+            const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? item.correctMime;
+            await axios.put(item.upload_url, buffer, { headers: { 'Content-Type': contentTypeFromUrl } });
+            console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
+          } catch (uploadErr) {
+            console.error(`[cloud-import] Chyba při uploadu ${item.file.name}:`, uploadErr);
+          }
+        }
+
+        console.log(`[cloud-import] Non-HDR batch ${upload_batch_id} dokončen, ${prepared.length} souborů`);
       }
     } catch (err) {
       console.error('[cloud-import] Fatální chyba:', err);
