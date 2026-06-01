@@ -455,6 +455,8 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
   res.status(200).json({ ok: true });
   try {
     const { event, image_id, error, order_id, order_is_processing } = req.body;
+    // DIAGNOSTIKA: loguj každý webhook payload
+    console.log('[webhook] payload:', JSON.stringify({ event, image_id, order_id, order_is_processing, error }));
     if (event !== 'image_processed' || error) return;
 
     let order = null;
