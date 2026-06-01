@@ -159,17 +159,14 @@ export default function DashboardPage() {
     });
   }, []);
 
-  // Skupina se zpracovává pokud:
-  // 1. Obsahuje hdr_pending_ order (HDR čeká na webhook), NEBO
-  // 2. Žádná fotka ze skupiny ještě nebyla načtena (non-HDR zpracovává se)
-  // Výjimka: expired skupina = vždy odemčená (cleanup je potřeba)
+  // Skupina se zpracovává pokud obsahuje hdr_pending_ order.
+  // Non-HDR nelze spolehlivě detekovat bez lazy load (thumbnaily se načítají
+  // až po otevření skupiny) — locked skupina by nikdy nešla otevřít.
+  // Proto lockujeme POUZE HDR pending skupiny.
   const isGroupProcessing = useCallback((group: BatchGroup): boolean => {
     if (group.isExpired) return false;
-    const hasHdrPending = group.orders.some(o => isHdrPending(o.image_id));
-    if (hasHdrPending) return true;
-    const hasAnyLoaded = group.orders.some(o => loadedImages.has(o.image_id));
-    return !hasAnyLoaded;
-  }, [loadedImages]);
+    return group.orders.some(o => isHdrPending(o.image_id));
+  }, []);
 
   const [placeholderText, setPlaceholderText] = useState('');
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
