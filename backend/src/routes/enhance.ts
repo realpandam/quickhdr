@@ -469,7 +469,7 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
     if (directOrder) order = directOrder;
 
     // ── 2. HDR: lookup přes hdr_order_id ─────────────────────────────────────
-    if (!order && order_id && !order_is_processing) {
+    if (!order && order_id) {
       // KRITICKÁ OPRAVA: původní .single() selhávalo jakmile vznikly 2+ řádky
       // se stejným hdr_order_id (po prvním webhooku se insertuje druhý řádek →
       // .single() vrátí chybu místo dat → handler tiše skipoval všechny další
