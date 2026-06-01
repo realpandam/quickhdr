@@ -44,7 +44,6 @@ const SEARCH_PLACEHOLDERS = [
   'Název souboru…',
 ];
 
-// ── Guard: hdr_pending image_id nemá ještě finální URL od Autoenhance ────────
 const isHdrPending = (image_id: string) => image_id?.startsWith('hdr_pending_');
 
 function groupOrders(orders: Order[]): BatchGroup[] {
@@ -67,65 +66,45 @@ function groupOrders(orders: Order[]): BatchGroup[] {
   }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
-// ── FIX Chyba 1 + 3: DashboardThumb — jednotný spinner pro HDR i non-HDR ─────
-// Stav loaded/error se propaguje ven přes onLoaded callback, aby parent
-// mohl rozlišit „zpracovává se" od „hotová" pro disable logiku (Chyba 3).
+// ── Thumbnail s loaderem ──────────────────────────────────────────────────────
 function DashboardThumb({
-  imageId,
-  filename,
-  pending,
-  isSelected,
-  onClick,
-  onLoaded,
+  imageId, filename, pending, isSelected, onClick, onLoaded,
 }: {
-  imageId: string;
-  filename: string;
-  pending: boolean;      // hdr_pending_ — webhook ještě nepřišel
-  isSelected: boolean;
-  onClick: () => void;
-  onLoaded: (imageId: string) => void;
+  imageId: string; filename: string; pending: boolean;
+  isSelected: boolean; onClick: () => void; onLoaded: (imageId: string) => void;
 }) {
   const [imgState, setImgState] = useState<'loading' | 'loaded' | 'error'>('loading');
   const [retryKey, setRetryKey] = useState(0);
 
-  // Auto-retry po 8 s pokud obrázek ještě není zpracovaný
   useEffect(() => {
     if (pending || imgState !== 'error') return;
-    const t = setTimeout(() => {
-      setImgState('loading');
-      setRetryKey(k => k + 1);
-    }, 8000);
+    const t = setTimeout(() => { setImgState('loading'); setRetryKey(k => k + 1); }, 8000);
     return () => clearTimeout(t);
   }, [imgState, pending]);
 
-  const showSpinner = pending || imgState === 'loading' || imgState === 'error';
-  const isClickable = !pending && imgState === 'loaded';
+  const isLoaded = imgState === 'loaded';
 
   return (
     <div
-      onClick={() => { if (isClickable) onClick(); }}
-      title={isClickable ? 'Klikněte pro přiblížení' : undefined}
+      onClick={() => { if (!pending && isLoaded) onClick(); }}
+      title={!pending && isLoaded ? 'Klikněte pro přiblížení' : undefined}
       style={{
         position: 'relative', width: '100%', paddingBottom: '75%',
         background: 'var(--bg-secondary)',
-        cursor: isClickable ? 'zoom-in' : 'default',
+        cursor: (!pending && isLoaded) ? 'zoom-in' : 'default',
         overflow: 'hidden', borderRadius: 7, marginBottom: 8,
         outline: isSelected ? '2px solid #7B5CF0' : 'none',
         outlineOffset: '-2px', transition: 'outline 0.15s ease',
       }}
     >
-      {/* Spinner — jednotný pro HDR i non-HDR ve zpracování */}
-      {showSpinner && (
+      {(pending || !isLoaded) && (
         <div style={{
-          position: 'absolute', inset: 0,
-          display: 'flex', flexDirection: 'column',
+          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 6,
         }}>
           <div style={{
-            width: 26, height: 26,
-            border: '3px solid var(--border)',
-            borderTop: '3px solid var(--accent)',
-            borderRadius: '50%',
+            width: 26, height: 26, border: '3px solid var(--border)',
+            borderTop: '3px solid var(--accent)', borderRadius: '50%',
             animation: 'spin 1s linear infinite',
           }} />
           <span style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', padding: '0 8px', lineHeight: 1.4 }}>
@@ -133,8 +112,6 @@ function DashboardThumb({
           </span>
         </div>
       )}
-
-      {/* Obrázek — jen pro non-pending; opacity 0 dokud se nenačte */}
       {!pending && (
         <img
           key={retryKey}
@@ -144,11 +121,10 @@ function DashboardThumb({
           onError={() => setImgState('error')}
           style={{
             position: 'absolute', inset: 0, width: '100%', height: '100%',
-            objectFit: 'cover',
-            opacity: imgState === 'loaded' ? 1 : 0,
+            objectFit: 'cover', opacity: isLoaded ? 1 : 0,
             transition: 'opacity 0.3s ease, transform 0.3s ease',
           }}
-          onMouseEnter={e => { if (imgState === 'loaded') (e.target as HTMLImageElement).style.transform = 'scale(1.05)'; }}
+          onMouseEnter={e => { if (isLoaded) (e.target as HTMLImageElement).style.transform = 'scale(1.05)'; }}
           onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
         />
       )}
@@ -173,8 +149,8 @@ export default function DashboardPage() {
   const [editingValue, setEditingValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // FIX Chyba 3: sleduj které obrázky se úspěšně načetly (= zpracované)
-  // Fotky bez záznamu v loadedImages jsou stále ve zpracování → disable akce
+  // Sledujeme které image_id se úspěšně načetly (= Autoenhance zpracoval)
+  // Skupina je "processing" dokud se aspoň jedna fotka nenačte
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
   const markLoaded = useCallback((imageId: string) => {
     setLoadedImages(prev => {
@@ -182,6 +158,18 @@ export default function DashboardPage() {
       const next = new Set(prev); next.add(imageId); return next;
     });
   }, []);
+
+  // Skupina se zpracovává pokud:
+  // 1. Obsahuje hdr_pending_ order (HDR čeká na webhook), NEBO
+  // 2. Žádná fotka ze skupiny ještě nebyla načtena (non-HDR zpracovává se)
+  // Výjimka: expired skupina = vždy odemčená (cleanup je potřeba)
+  const isGroupProcessing = useCallback((group: BatchGroup): boolean => {
+    if (group.isExpired) return false;
+    const hasHdrPending = group.orders.some(o => isHdrPending(o.image_id));
+    if (hasHdrPending) return true;
+    const hasAnyLoaded = group.orders.some(o => loadedImages.has(o.image_id));
+    return !hasAnyLoaded;
+  }, [loadedImages]);
 
   const [placeholderText, setPlaceholderText] = useState('');
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
@@ -273,11 +261,8 @@ export default function DashboardPage() {
 
   const toggleSelectAll = (group: BatchGroup, e: React.MouseEvent) => {
     e.stopPropagation();
-    // FIX Chyba 3: vybírej jen načtené (hotové) a non-pending fotky
     const groupIds = group.orders
-      .filter(o => new Date(o.expires_at) > new Date()
-        && !isHdrPending(o.image_id)
-        && loadedImages.has(o.image_id))
+      .filter(o => new Date(o.expires_at) > new Date() && !isHdrPending(o.image_id) && loadedImages.has(o.image_id))
       .map(o => o.id);
     const allSelected = groupIds.every(id => selectedOrders.has(id));
     setSelectedOrders(prev => {
@@ -299,29 +284,18 @@ export default function DashboardPage() {
     setEditingBatch(null);
     if (!newName || newName === group.name) return;
     const imageIds = group.orders.map(o => o.id);
-    await supabase.from('orders')
-      .update({ batch_name: newName })
-      .in('id', imageIds)
-      .eq('user_id', user!.id);
-    setOrders(prev => prev.map(o =>
-      imageIds.includes(o.id) ? { ...o, batch_name: newName } : o
-    ));
+    await supabase.from('orders').update({ batch_name: newName }).in('id', imageIds).eq('user_id', user!.id);
+    setOrders(prev => prev.map(o => imageIds.includes(o.id) ? { ...o, batch_name: newName } : o));
   };
 
-  const cancelRename = () => {
-    setEditingBatch(null);
-    setEditingValue('');
-  };
+  const cancelRename = () => { setEditingBatch(null); setEditingValue(''); };
 
   const getSelectedOrderObjects = () => orders.filter(o => selectedOrders.has(o.id));
 
   const selectedPaid = getSelectedOrderObjects().filter(o => o.payment_status === 'paid' && new Date(o.expires_at) > new Date());
-  // FIX Chyba 3: vyloučit pending (zpracovávají se) z výběru ke koupi
   const selectedPending = getSelectedOrderObjects().filter(o =>
-    o.payment_status !== 'paid'
-    && new Date(o.expires_at) > new Date()
-    && !isHdrPending(o.image_id)
-    && loadedImages.has(o.image_id)
+    o.payment_status !== 'paid' && new Date(o.expires_at) > new Date()
+    && !isHdrPending(o.image_id) && loadedImages.has(o.image_id)
   );
 
   const handleBuySelected = async () => {
@@ -336,15 +310,12 @@ export default function DashboardPage() {
           image_ids: selectedPending.map(o => o.image_id),
           image_id: selectedPending[0].image_id,
           filename: `${selectedPending.length} fotografií`,
-          user_id: user.id,
-          email: user.email ?? null,
+          user_id: user.id, email: user.email ?? null,
         }),
       });
       const data = await res.json();
       if (data.url) window.location.href = data.url;
-    } finally {
-      setCheckoutLoading(false);
-    }
+    } finally { setCheckoutLoading(false); }
   };
 
   const handleBuy = async (order: Order) => {
@@ -439,7 +410,6 @@ export default function DashboardPage() {
 
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: 'clamp(2.5rem, 5vw, 3.5rem) clamp(1.5rem, 4vw, 2.5rem)' }}>
 
-        {/* Header */}
         <div style={{ marginBottom: '3rem' }}>
           <h1 style={{ fontSize: 'clamp(2.2rem, 6vw, 3rem)', fontWeight: 900, letterSpacing: '-0.03em', color: 'var(--text-primary)', marginBottom: '0.75rem' }}>
             Vaše fotografie
@@ -449,7 +419,6 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Controls */}
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '2.5rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' as const, alignItems: 'center' }}>
             <a href="/#editor" style={{
@@ -502,10 +471,7 @@ export default function DashboardPage() {
                 ))}
               </div>
               <div style={{ position: 'relative' }}>
-                <span style={{
-                  position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-                  fontSize: 13, pointerEvents: 'none', color: 'var(--text-muted)',
-                }}>
+                <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, pointerEvents: 'none', color: 'var(--text-muted)' }}>
                   {sort === 'newest' ? '↓' : sort === 'oldest' ? '↑' : sort === 'az' ? 'A' : 'Z'}
                 </span>
                 <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} style={{
@@ -529,9 +495,7 @@ export default function DashboardPage() {
 
         {/* Multiselect action bar */}
         <div style={{
-          overflow: 'hidden',
-          maxHeight: hasSelection ? 80 : 0,
-          opacity: hasSelection ? 1 : 0,
+          overflow: 'hidden', maxHeight: hasSelection ? 80 : 0, opacity: hasSelection ? 1 : 0,
           transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.25s ease',
           marginBottom: hasSelection ? '1.25rem' : 0,
         }}>
@@ -568,7 +532,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Empty state */}
         {orders.length === 0 ? (
           <div style={{ textAlign: 'center' as const, padding: '4rem 2rem' }}>
             <div style={{ fontSize: 64, marginBottom: '1.5rem', opacity: 0.5 }}>📷</div>
@@ -596,11 +559,13 @@ export default function DashboardPage() {
                 const allPaid = group.paidCount === group.totalCount;
                 const isSingle = group.totalCount === 1;
                 const activeOrders = group.orders.filter(o => new Date(o.expires_at) > new Date());
-                // FIX Chyba 3: select-all checkbox jen pro hotové fotky
                 const selectableOrders = activeOrders.filter(o => !isHdrPending(o.image_id) && loadedImages.has(o.image_id));
                 const allGroupSelected = selectableOrders.length > 0 && selectableOrders.every(o => selectedOrders.has(o.id));
                 const someGroupSelected = selectableOrders.some(o => selectedOrders.has(o.id));
                 const isEditing = editingBatch === group.batch_id;
+
+                // ── Klíčová logika: skupina se zpracovává ──────────────────
+                const groupProcessing = isGroupProcessing(group);
 
                 return (
                   <div key={group.batch_id} className="batch-card" style={{
@@ -609,25 +574,29 @@ export default function DashboardPage() {
                     background: 'var(--bg-card)', overflow: 'hidden',
                     animation: `slideUp 0.4s cubic-bezier(0.34,1.56,0.64,1) ${gIdx * 0.05}s both`,
                     transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
+                    // Vizuální zašednutí celé karty při zpracování
+                    opacity: groupProcessing ? 0.6 : 1,
+                    pointerEvents: groupProcessing ? 'none' : 'auto',
                   }}>
 
                     {/* Batch header */}
                     <div
-                      onClick={() => !isEditing && toggleBatch(group.batch_id)}
+                      onClick={() => !isEditing && !groupProcessing && toggleBatch(group.batch_id)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 12,
-                        padding: '13px 16px', cursor: isEditing ? 'default' : 'pointer',
+                        padding: '13px 16px',
+                        cursor: isEditing || groupProcessing ? 'default' : 'pointer',
                         borderBottom: isOpen ? '1px solid var(--border)' : 'none',
                         background: batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)',
                         transition: 'background 0.2s',
                         opacity: batchExpired ? 0.75 : 1,
                         userSelect: 'none' as const,
                       }}
-                      onMouseEnter={e => { if (!isEditing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.06)' : 'var(--bg-secondary)'; }}
-                      onMouseLeave={e => { if (!isEditing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)'; }}
+                      onMouseEnter={e => { if (!isEditing && !groupProcessing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.06)' : 'var(--bg-secondary)'; }}
+                      onMouseLeave={e => { if (!isEditing && !groupProcessing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)'; }}
                     >
-                      {/* Select all checkbox — jen pokud existují selektovatelné fotky */}
-                      {!batchExpired && selectableOrders.length > 0 && (
+                      {/* Select all — skryj při zpracování */}
+                      {!batchExpired && !groupProcessing && selectableOrders.length > 0 && (
                         <div
                           onClick={e => toggleSelectAll(group, e)}
                           style={{
@@ -643,18 +612,18 @@ export default function DashboardPage() {
                         </div>
                       )}
 
-                      {/* Icon */}
                       <div style={{
                         width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-                        background: batchExpired ? 'rgba(239,68,68,0.12)' : 'rgba(123,92,240,0.12)',
+                        background: batchExpired ? 'rgba(239,68,68,0.12)' : groupProcessing ? 'rgba(123,92,240,0.08)' : 'rgba(123,92,240,0.12)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17,
                       }}>
-                        {batchExpired ? '⏰' : isSingle ? '🖼️' : '📁'}
+                        {batchExpired ? '⏰' : groupProcessing ? (
+                          <div style={{ width: 16, height: 16, border: '2px solid var(--border)', borderTop: '2px solid var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                        ) : isSingle ? '🖼️' : '📁'}
                       </div>
 
-                      {/* Name */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        {isEditing ? (
+                        {isEditing && !groupProcessing ? (
                           <input
                             ref={renameInputRef}
                             value={editingValue}
@@ -671,7 +640,6 @@ export default function DashboardPage() {
                               border: '1.5px solid var(--accent)', borderRadius: 6,
                               padding: '4px 8px', outline: 'none', fontFamily: 'inherit',
                               boxShadow: '0 0 0 3px rgba(123,92,240,0.15)',
-                              transition: 'all 0.15s ease',
                             }}
                             placeholder="Název skupiny…"
                             maxLength={80}
@@ -679,21 +647,21 @@ export default function DashboardPage() {
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                             <p
-                              onClick={e => !batchExpired && startRename(group, e)}
-                              title={batchExpired ? undefined : 'Klikněte pro přejmenování'}
+                              onClick={e => !batchExpired && !groupProcessing && startRename(group, e)}
+                              title={batchExpired || groupProcessing ? undefined : 'Klikněte pro přejmenování'}
                               style={{
                                 fontSize: 14, fontWeight: 600, color: 'var(--text-primary)',
                                 margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                cursor: batchExpired ? 'default' : 'text',
+                                cursor: batchExpired || groupProcessing ? 'default' : 'text',
                                 padding: '4px 6px', borderRadius: 5, marginLeft: -6,
                                 transition: 'background 0.15s ease',
                               }}
-                              onMouseEnter={e => { if (!batchExpired) (e.currentTarget as HTMLParagraphElement).style.background = 'var(--bg-secondary)'; }}
+                              onMouseEnter={e => { if (!batchExpired && !groupProcessing) (e.currentTarget as HTMLParagraphElement).style.background = 'var(--bg-secondary)'; }}
                               onMouseLeave={e => { (e.currentTarget as HTMLParagraphElement).style.background = 'transparent'; }}
                             >
                               {group.name}
                             </p>
-                            {!batchExpired && (
+                            {!batchExpired && !groupProcessing && (
                               <span
                                 onClick={e => startRename(group, e)}
                                 title="Přejmenovat"
@@ -708,14 +676,19 @@ export default function DashboardPage() {
                         )}
                         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
                           {new Date(group.created_at).toLocaleDateString('cs-CZ')}
-                          {countdown && !batchExpired && ` · Vyprší za ${countdown}`}
+                          {groupProcessing && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>· Zpracovává se…</span>}
+                          {!groupProcessing && countdown && !batchExpired && ` · Vyprší za ${countdown}`}
                           {batchExpired && <span style={{ color: '#ef4444' }}> · Vypršelo</span>}
                         </p>
                       </div>
 
-                      {/* Badges */}
+                      {/* Badges — skryj delete při zpracování */}
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                        {batchExpired ? (
+                        {groupProcessing ? (
+                          <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(123,92,240,0.12)', color: 'var(--accent)' }}>
+                            ⏳ Zpracovává se
+                          </span>
+                        ) : batchExpired ? (
                           <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(239,68,68,0.12)', color: '#ef4444' }}>Vypršelo</span>
                         ) : allPaid ? (
                           <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(74,222,128,0.12)', color: '#4ade80' }}>✓ Zaplaceno</span>
@@ -730,159 +703,171 @@ export default function DashboardPage() {
                             {group.totalCount} fotek
                           </span>
                         )}
-                        <button
-                          onClick={e => { e.stopPropagation(); handleDeleteBatch(group.orders); }}
-                          title="Smazat skupinu"
-                          style={{
-                            width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: 'transparent', border: '1px solid transparent', borderRadius: 6,
-                            color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, transition: 'all 0.15s ease',
-                          }}
-                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.1)'; (e.currentTarget as HTMLButtonElement).style.color = '#ef4444'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.3)'; }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent'; }}
-                        >
-                          🗑
-                        </button>
+                        {/* 🗑 batch delete — pouze pokud NENÍ zpracovávání */}
+                        {!groupProcessing && (
+                          <button
+                            onClick={e => { e.stopPropagation(); handleDeleteBatch(group.orders); }}
+                            title="Smazat skupinu"
+                            style={{
+                              width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              background: 'transparent', border: '1px solid transparent', borderRadius: 6,
+                              color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, transition: 'all 0.15s ease',
+                            }}
+                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.1)'; (e.currentTarget as HTMLButtonElement).style.color = '#ef4444'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.3)'; }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent'; }}
+                          >
+                            🗑
+                          </button>
+                        )}
                         <span style={{ fontSize: 15, color: 'var(--text-muted)', transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block', marginLeft: 2 }}>
                           ▾
                         </span>
                       </div>
                     </div>
 
-                    {/* Expanded content */}
+                    {/* Expanded content — celý blok disabled při zpracování */}
                     <div style={{
                       display: 'grid',
                       gridTemplateRows: isOpen ? '1fr' : '0fr',
                       transition: 'grid-template-rows 0.35s cubic-bezier(0.4,0,0.2,1)',
                     }}>
                       <div style={{ overflow: 'hidden' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1px', background: 'var(--border)' }}>
-                          {group.orders.map((order, oIdx) => {
-                            const expired = new Date(order.expires_at) < new Date();
-                            const isPaid = order.payment_status === 'paid';
-                            const countdown = getCountdown(order.expires_at);
-                            const isSelected = selectedOrders.has(order.id);
-                            const pending = isHdrPending(order.image_id);
-                            // FIX Chyba 3: fotka se zpracovává pokud je pending HDR,
-                            // nebo pokud ještě nebyla úspěšně načtena (non-HDR ve zpracování)
-                            const isProcessing = pending || (!isPaid && !expired && !loadedImages.has(order.image_id));
+                        {/* Overlay při zpracování — zakryje celý obsah */}
+                        {groupProcessing && isOpen && (
+                          <div style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                            gap: 12, padding: '2.5rem 1rem',
+                            background: 'var(--bg-card)',
+                          }}>
+                            <div style={{
+                              width: 36, height: 36, border: '3px solid var(--border)',
+                              borderTop: '3px solid var(--accent)', borderRadius: '50%',
+                              animation: 'spin 1s linear infinite',
+                            }} />
+                            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>
+                              Fotografie se zpracovávají…<br />
+                              <span style={{ fontSize: 12, opacity: 0.7 }}>Pošleme vám email až budou připraveny.</span>
+                            </p>
+                          </div>
+                        )}
 
-                            return (
-                              <div key={order.id} style={{
-                                background: isSelected ? 'rgba(123,92,240,0.06)' : 'var(--bg-card)',
-                                padding: '10px', transition: 'background 0.15s ease',
-                                animation: isOpen ? `fadeInPhoto 0.3s ease ${oIdx * 0.03}s both` : 'none',
-                                position: 'relative' as const,
-                              }}>
-                                {/* Checkbox — jen pro hotové fotky (ne zpracovávající se) */}
-                                {!expired && !isProcessing && (
-                                  <div
-                                    onClick={e => toggleOrder(order.id, e)}
-                                    style={{
-                                      position: 'absolute' as const, top: 18, left: 18, zIndex: 2,
-                                      width: 18, height: 18, borderRadius: 4,
-                                      border: `2px solid ${isSelected ? '#7B5CF0' : 'rgba(255,255,255,0.7)'}`,
-                                      background: isSelected ? '#7B5CF0' : 'rgba(0,0,0,0.35)',
-                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                      cursor: 'pointer', transition: 'all 0.15s ease',
-                                      backdropFilter: 'blur(4px)',
-                                    }}
-                                  >
-                                    {isSelected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
-                                  </div>
-                                )}
+                        {/* Fotky — zobrazí se jen pokud není zpracování */}
+                        {!groupProcessing && (
+                          <>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1px', background: 'var(--border)' }}>
+                              {group.orders.map((order, oIdx) => {
+                                const expired = new Date(order.expires_at) < new Date();
+                                const isPaid = order.payment_status === 'paid';
+                                const countdown = getCountdown(order.expires_at);
+                                const isSelected = selectedOrders.has(order.id);
 
-                                {/* FIX Chyba 1: DashboardThumb — jednotný spinner pro HDR i non-HDR */}
-                                <div style={{ position: 'relative' as const }}>
-                                  <DashboardThumb
-                                    imageId={order.image_id}
-                                    filename={order.filename}
-                                    pending={pending}
-                                    isSelected={isSelected}
-                                    onClick={() => openLightbox(group.orders, oIdx)}
-                                    onLoaded={markLoaded}
-                                  />
-                                  {/* Zaplaceno badge */}
-                                  {isPaid && !expired && !pending && loadedImages.has(order.image_id) && (
-                                    <div style={{ position: 'absolute' as const, top: 5, right: 5, background: 'rgba(74,222,128,0.9)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, color: '#052e16', zIndex: 1 }}>✓</div>
-                                  )}
-                                </div>
-
-                                <p style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', margin: '0 0 3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {order.filename && !order.filename.match(/^[0-9a-f-]{36}/) ? order.filename : 'Bez názvu'}
-                                </p>
-
-                                {countdown && (
-                                  <p style={{ fontSize: 10, color: expired ? '#ef4444' : countdown.startsWith('0h') ? '#f97316' : 'var(--text-muted)', margin: '0 0 7px' }}>
-                                    {expired ? 'Vypršelo' : `Vyprší za ${countdown}`}
-                                  </p>
-                                )}
-
-                                <div style={{ display: 'flex', gap: 5 }}>
-                                  {isPaid && !expired && !isProcessing ? (
-                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                      <a
-                                        href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
-                                        download={order.filename && !order.filename.match(/^[0-9a-f-]{36}/) ? `enhanced_${order.filename}` : `foto_${order.image_id.slice(0, 8)}.jpg`}
-                                        style={{ textAlign: 'center', padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, textDecoration: 'none', display: 'block', fontFamily: 'inherit' }}
+                                return (
+                                  <div key={order.id} style={{
+                                    background: isSelected ? 'rgba(123,92,240,0.06)' : 'var(--bg-card)',
+                                    padding: '10px', transition: 'background 0.15s ease',
+                                    animation: isOpen ? `fadeInPhoto 0.3s ease ${oIdx * 0.03}s both` : 'none',
+                                    position: 'relative' as const,
+                                  }}>
+                                    {/* Checkbox — jen pro hotové nezaplacené */}
+                                    {!expired && isPaid === false && loadedImages.has(order.image_id) && (
+                                      <div
+                                        onClick={e => toggleOrder(order.id, e)}
+                                        style={{
+                                          position: 'absolute' as const, top: 18, left: 18, zIndex: 2,
+                                          width: 18, height: 18, borderRadius: 4,
+                                          border: `2px solid ${isSelected ? '#7B5CF0' : 'rgba(255,255,255,0.7)'}`,
+                                          background: isSelected ? '#7B5CF0' : 'rgba(0,0,0,0.35)',
+                                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                          cursor: 'pointer', transition: 'all 0.15s ease',
+                                          backdropFilter: 'blur(4px)',
+                                        }}
                                       >
-                                        Stáhnout
-                                      </a>
-                                      {order.uol_invoice_id && (
-                                        <a
-                                          href={`${API_URL}/api/billing/invoice/${order.image_id}`}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          onClick={async (e) => {
-                                            e.preventDefault();
-                                            try {
-                                              const res = await fetch(`${API_URL}/api/billing/invoice/${order.image_id}`);
-                                              const { url } = await res.json();
-                                              if (url) window.open(url, '_blank');
-                                            } catch {
-                                              console.error('Nepodařilo se načíst fakturu');
-                                            }
-                                          }}
-                                          style={{ textAlign: 'center', padding: '5px 8px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', fontSize: 10, fontWeight: 600, textDecoration: 'none', display: 'block', fontFamily: 'inherit', transition: 'all 0.15s ease' }}
-                                          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
-                                          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-muted)'; }}
-                                        >
-                                          📄 Faktura
-                                        </a>
+                                        {isSelected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                                      </div>
+                                    )}
+
+                                    <div style={{ position: 'relative' as const }}>
+                                      <DashboardThumb
+                                        imageId={order.image_id}
+                                        filename={order.filename}
+                                        pending={isHdrPending(order.image_id)}
+                                        isSelected={isSelected}
+                                        onClick={() => openLightbox(group.orders, oIdx)}
+                                        onLoaded={markLoaded}
+                                      />
+                                      {isPaid && !expired && loadedImages.has(order.image_id) && (
+                                        <div style={{ position: 'absolute' as const, top: 5, right: 5, background: 'rgba(74,222,128,0.9)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, color: '#052e16', zIndex: 1 }}>✓</div>
                                       )}
                                     </div>
-                                  ) : isProcessing ? (
-                                    // FIX Chyba 3: zpracovávající se fotka — žádné akce
-                                    <span style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                                      Čeká na dokončení zpracování
-                                    </span>
-                                  ) : !expired ? (
-                                    <button onClick={() => handleBuy(order)} style={{ flex: 1, padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }}>
-                                      Koupit
-                                    </button>
-                                  ) : null}
-                                  {/* FIX Chyba 3: Smazat POUZE pro expired fotky, NIKDY pro zpracovávající se */}
-                                  {expired && !isProcessing && (
-                                    <button onClick={() => handleDelete(order.id)} style={{ padding: '6px 8px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}>
-                                      🗑
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
 
-                        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                            {group.paidCount} z {group.totalCount} zaplaceno · {group.orders.reduce((s, o) => s + (o.amount_czk || 0), 0)} Kč celkem
-                          </span>
-                          {batchExpired && (
-                            <button onClick={() => handleDeleteBatch(group.orders)} style={{ padding: '6px 14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
-                              🗑 Smazat skupinu
-                            </button>
-                          )}
-                        </div>
+                                    <p style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', margin: '0 0 3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {order.filename && !order.filename.match(/^[0-9a-f-]{36}/) ? order.filename : 'Bez názvu'}
+                                    </p>
+
+                                    {countdown && (
+                                      <p style={{ fontSize: 10, color: expired ? '#ef4444' : countdown.startsWith('0h') ? '#f97316' : 'var(--text-muted)', margin: '0 0 7px' }}>
+                                        {expired ? 'Vypršelo' : `Vyprší za ${countdown}`}
+                                      </p>
+                                    )}
+
+                                    <div style={{ display: 'flex', gap: 5 }}>
+                                      {isPaid && !expired ? (
+                                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                          <a
+                                            href={`${API_URL}/api/enhance/enhanced/${order.image_id}?preview=false`}
+                                            download={order.filename && !order.filename.match(/^[0-9a-f-]{36}/) ? `enhanced_${order.filename}` : `foto_${order.image_id.slice(0, 8)}.jpg`}
+                                            style={{ textAlign: 'center', padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, textDecoration: 'none', display: 'block', fontFamily: 'inherit' }}
+                                          >
+                                            Stáhnout
+                                          </a>
+                                          {order.uol_invoice_id && (
+                                            <a
+                                              href={`${API_URL}/api/billing/invoice/${order.image_id}`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              onClick={async (e) => {
+                                                e.preventDefault();
+                                                try {
+                                                  const res = await fetch(`${API_URL}/api/billing/invoice/${order.image_id}`);
+                                                  const { url } = await res.json();
+                                                  if (url) window.open(url, '_blank');
+                                                } catch { console.error('Nepodařilo se načíst fakturu'); }
+                                              }}
+                                              style={{ textAlign: 'center', padding: '5px 8px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', fontSize: 10, fontWeight: 600, textDecoration: 'none', display: 'block', fontFamily: 'inherit', transition: 'all 0.15s ease' }}
+                                              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
+                                              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-muted)'; }}
+                                            >
+                                              📄 Faktura
+                                            </a>
+                                          )}
+                                        </div>
+                                      ) : !expired && loadedImages.has(order.image_id) ? (
+                                        <button onClick={() => handleBuy(order)} style={{ flex: 1, padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }}>
+                                          Koupit
+                                        </button>
+                                      ) : expired ? (
+                                        <button onClick={() => handleDelete(order.id)} style={{ flex: 1, padding: '6px 8px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}>
+                                          🗑
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                {group.paidCount} z {group.totalCount} zaplaceno · {group.orders.reduce((s, o) => s + (o.amount_czk || 0), 0)} Kč celkem
+                              </span>
+                              {batchExpired && (
+                                <button onClick={() => handleDeleteBatch(group.orders)} style={{ padding: '6px 14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
+                                  🗑 Smazat skupinu
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -974,34 +959,13 @@ export default function DashboardPage() {
       )}
 
       <style>{`
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(18px) scale(0.99); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes zoomIn {
-          from { opacity: 0; transform: scale(0.94); }
-          to { opacity: 1; transform: scale(1); }
-        }
-        @keyframes fadeInPhoto {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .batch-card:hover {
-          box-shadow: 0 4px 24px rgba(0,0,0,0.1);
-        }
-        @media (max-width: 768px) {
-          div[style*="minmax(180px"] {
-            grid-template-columns: repeat(2, 1fr) !important;
-          }
-        }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(18px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes zoomIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
+        @keyframes fadeInPhoto { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .batch-card:hover { box-shadow: 0 4px 24px rgba(0,0,0,0.1); }
+        @media (max-width: 768px) { div[style*="minmax(180px"] { grid-template-columns: repeat(2, 1fr) !important; } }
       `}</style>
     </main>
   );
