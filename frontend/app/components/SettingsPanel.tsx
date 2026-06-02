@@ -28,12 +28,16 @@ function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; la
       aria-checked={on}
       onClick={onToggle}
       className="toggle-wrap"
-      style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' as const, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+      style={{
+        fontSize: 13, color: 'var(--text-secondary)',
+        userSelect: 'none' as const, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: '0.5rem',
+      }}
     >
-      <div className={`toggle-track ${on ? 'on' : ''}`}>
+      <div className={`toggle-track ${on ? 'on' : ''}`} style={{ flexShrink: 0 }}>
         <div className="toggle-thumb" />
       </div>
-      {label}
+      <span style={{ lineHeight: 1.4 }}>{label}</span>
     </div>
   );
 }
@@ -103,7 +107,7 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             </select>
           </div>
 
-          {/* Cloud type — always rendered to prevent grid reflow */}
+          {/* Cloud type */}
           <div style={{ visibility: settings.sky_replacement ? 'visible' : 'hidden' }}>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Typ oblohy</p>
             <select
@@ -118,17 +122,19 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             </select>
           </div>
 
-          {/* Toggles — two columns, always on the same grid row */}
-          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '2.5rem', marginTop: '0.75rem' }}>
-            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.85rem' }}>
-              <Toggle on={settings.sky_replacement} onToggle={() => set('sky_replacement', !settings.sky_replacement)} label="Výměna oblohy" />
-              <Toggle on={settings.vertical_correction} onToggle={() => set('vertical_correction', !settings.vertical_correction)} label="Srovnání linií" />
-              <Toggle on={settings.lens_correction} onToggle={() => set('lens_correction', !settings.lens_correction)} label="Korekce objektivu" />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '0.85rem' }}>
-              <Toggle on={settings.upscale} onToggle={() => set('upscale', !settings.upscale)} label="Zvýšení rozlišení" />
-              <Toggle on={settings.privacy} onToggle={() => set('privacy', !settings.privacy)} label="Anonymizace (obličeje, SPZ)" />
-            </div>
+          {/* Toggles — FIX: flexWrap aby se na mobilu zalomily do jednoho sloupce */}
+          <div style={{
+            gridColumn: '1 / -1',
+            display: 'flex',
+            flexWrap: 'wrap' as const,
+            gap: '0.85rem 2.5rem',
+            marginTop: '0.75rem',
+          }}>
+            <Toggle on={settings.sky_replacement} onToggle={() => set('sky_replacement', !settings.sky_replacement)} label="Výměna oblohy" />
+            <Toggle on={settings.vertical_correction} onToggle={() => set('vertical_correction', !settings.vertical_correction)} label="Srovnání linií" />
+            <Toggle on={settings.lens_correction} onToggle={() => set('lens_correction', !settings.lens_correction)} label="Korekce objektivu" />
+            <Toggle on={settings.upscale} onToggle={() => set('upscale', !settings.upscale)} label="Zvýšení rozlišení" />
+            <Toggle on={settings.privacy} onToggle={() => set('privacy', !settings.privacy)} label="Anonymizace obličejů a SPZ" />
           </div>
 
           {/* HDR sekce */}
@@ -144,7 +150,7 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             <Toggle on={settings.hdr_mode} onToggle={() => set('hdr_mode', !settings.hdr_mode)} label="HDR režim — nahrát více expozic stejné scény" />
 
             {settings.hdr_mode && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' as const }}>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' as const }}>
                   Počet bracketů na scénu
                 </p>
