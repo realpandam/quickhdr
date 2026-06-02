@@ -93,20 +93,15 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 const data = await res.json();
 
                 if (!user && hdrMode && data.order_id) {
-                    // ── Nepřihlášený uživatel v HDR módu → redirect na order page ──
                     window.location.href = `/order/hdr_pending_${data.order_id}`;
                     return;
                 }
 
                 if (!user && !hdrMode && data.upload_batch_id) {
-                    // ── Nepřihlášený uživatel v non-HDR módu → redirect na první image ──
-                    // (pro non-HDR cloud import není order page relevantní,
-                    //  ale zachováme konzistenci — zobrazíme accepted stav)
                     setCloudState('accepted');
                     return;
                 }
 
-                // ── Přihlášený uživatel → zobraz "Můžete zavřít stránku" ──
                 setCloudState('accepted');
             } else {
                 const data = await res.json().catch(() => ({}));
@@ -147,6 +142,10 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                     if (!api?.ViewId) { console.error('Google Picker API není dostupné'); return; }
 
                     const docsView = new api.DocsView(api.ViewId.DOCS);
+                    // FIX: zobraz složky v pickeru a umožni procházení
+                    docsView.setIncludeFolders(true);
+                    docsView.setSelectFolderEnabled(true);
+
                     const p = new api.PickerBuilder()
                         .addView(docsView)
                         .setOAuthToken(token)
@@ -227,7 +226,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 </button>
             </div>
 
-            {/* Odesílání na backend — krátký spinner */}
+            {/* Odesílání na backend */}
             {cloudState === 'submitting' && (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: '2rem 2.5rem', width: 340, textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
@@ -243,7 +242,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 </div>
             )}
 
-            {/* Přijato — přihlášený uživatel může odejít */}
+            {/* Přijato */}
             {cloudState === 'accepted' && (
                 <div style={{ margin: '1rem 0', padding: '1rem 1.25rem', background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 10, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                     <span style={{ fontSize: 20, flexShrink: 0 }}>✓</span>
