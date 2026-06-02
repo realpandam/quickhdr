@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const PARTICLES = Array.from({ length: 40 }, (_, i) => ({
+// FIX: 40 → 8 particles. Každá particle s backdrop-filter nad sebou
+// nutí GPU přepočítat gaussian blur 60×/s → 14 fps. 8 particles = zanedbatelná zátěž.
+const PARTICLES = Array.from({ length: 8 }, (_, i) => ({
   id: i,
-  x: (i * 37.3) % 100,
-  y: (i * 61.7) % 100,
+  x: (i * 37.3 * 4.2) % 100,
+  y: (i * 61.7 * 3.1) % 100,
   size: (i % 5) * 0.4 + 0.6,
   opacity: (i % 5) * 0.06 + 0.08,
   speed: (i % 6) * 3 + 14,
@@ -58,13 +60,23 @@ function AnimatedCounter({ value, prefix = '', suffix = '', duration = 2000 }: {
 export default function Hero() {
   const sectionRef = useRef<HTMLElement>(null);
 
+  // FIX: throttle mousemove na 60fps max pomocí requestAnimationFrame
+  // Původně se CSS proměnné updateovaly na každý mousemove event (stovky/s)
   useEffect(() => {
+    let rafId: number | null = null;
     const handleMouse = (e: MouseEvent) => {
-      document.documentElement.style.setProperty('--mx', `${e.clientX}px`);
-      document.documentElement.style.setProperty('--my', `${e.clientY}px`);
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        document.documentElement.style.setProperty('--mx', `${e.clientX}px`);
+        document.documentElement.style.setProperty('--my', `${e.clientY}px`);
+        rafId = null;
+      });
     };
-    window.addEventListener('mousemove', handleMouse);
-    return () => window.removeEventListener('mousemove', handleMouse);
+    window.addEventListener('mousemove', handleMouse, { passive: true });
+    return () => {
+      window.removeEventListener('mousemove', handleMouse);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   useEffect(() => {
@@ -88,7 +100,9 @@ export default function Hero() {
       alignItems: 'center',
       justifyContent: 'center',
     }}>
-      {/* Particles */}
+      {/* Particles — zůstávají POD glass-card (zIndex: 1) a glass-card je zIndex: 2.
+          Backdrop-filter na glass-card musí přepočítávat vše za ní při každém pohybu.
+          Proto jsme snížili particles z 40 na 8 — stále vypadají dobře, GPU to zvládne. */}
       <div style={{ position: 'absolute' as const, inset: 0, pointerEvents: 'none', zIndex: 1 }}>
         {PARTICLES.map(p => (
           <div key={p.id} style={{
@@ -100,13 +114,16 @@ export default function Hero() {
             borderRadius: '50%',
             background: 'var(--accent)',
             opacity: p.opacity,
+            // FIX: will-change: transform říká GPU "tenhle element se bude hýbat"
+            // → přesune ho do vlastní compositor vrstvy → nezpůsobuje repaint okolí
+            willChange: 'transform',
             animation: `floatParticle ${p.speed}s ease-in-out infinite`,
             animationDelay: `${p.delay}s`,
           }} />
         ))}
       </div>
 
-      {/* GLASS CARD wrap - dělá text čitelným nad blueprintem */}
+      {/* GLASS CARD — backdrop-filter: blur zůstává POUZE zde (1 vrstva místo 18) */}
       <div className="glass-card" style={{
         position: 'relative' as const,
         zIndex: 2,
@@ -127,7 +144,7 @@ export default function Hero() {
           padding: '5px 16px',
           marginBottom: '2rem',
           background: 'linear-gradient(135deg, rgba(107,71,220,0.15), rgba(167,139,250,0.15))',
-          backdropFilter: 'blur(8px)',
+          // FIX: badge nemá vlastní backdrop-filter — dědí z glass-card
         }}>
           <span style={{
             width: 6, height: 6, borderRadius: '50%',
@@ -190,7 +207,7 @@ export default function Hero() {
           </a>
         </div>
 
-        {/* Stats - jsou uvnitř glass karty bez vlastního pozadí */}
+        {/* Stats */}
         <div style={{
           display: 'flex',
           justifyContent: 'center',

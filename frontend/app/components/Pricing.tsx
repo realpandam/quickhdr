@@ -105,7 +105,7 @@ export default function Pricing() {
           </p>
         </div>
 
-        {/* Hero Glassmorphism Card */}
+        {/* Hero karta — stejné pozadí jako .glass-card po performance opravě */}
         <div
           ref={cardRef}
           onMouseMove={handleMouseMove}
@@ -115,11 +115,13 @@ export default function Pricing() {
             margin: '0 auto',
             position: 'relative' as const,
             borderRadius: 24,
-            background: 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(167,139,250,0.03))',
-            border: '1px solid var(--border)',
+            // FIX: původní rgba(139,92,246,0.06) bylo skoro průhledné → jiné pozadí než ostatní karty.
+            // Sjednoceno s .glass-card: tmavé solidní pozadí, konzistentní vizuál.
+            background: 'linear-gradient(135deg, rgba(107, 71, 220, 0.06), rgba(139, 92, 246, 0.03))',
+            backgroundColor: '#07060d',
+            border: '1px solid rgba(139, 92, 246, 0.12)',
             padding: 'clamp(2rem, 5vw, 4rem)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
+            // backdropFilter odstraněn — konzistentní s globals.css opravou (performance fix)
             overflow: 'hidden',
             boxShadow: '0 30px 80px rgba(0,0,0,0.3), 0 0 0 1px rgba(139,92,246,0.1) inset',
           }}
@@ -264,7 +266,7 @@ export default function Pricing() {
               margin: '2rem 0',
             }} />
 
-            {/* Features grid - 2 columns */}
+            {/* Features grid */}
             <div>
               <p style={{
                 fontSize: 11,
@@ -320,7 +322,7 @@ export default function Pricing() {
               margin: '2rem 0',
             }} />
 
-            {/* Benefits - compact horizontal */}
+            {/* Benefits */}
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
@@ -328,22 +330,11 @@ export default function Pricing() {
               textAlign: 'center' as const,
             }}>
               {benefits.map(b => (
-                <div key={b.title} style={{
-                  padding: '0.5rem',
-                }}>
-                  <div style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: 'var(--text-primary)',
-                    marginBottom: 4,
-                  }}>
+                <div key={b.title} style={{ padding: '0.5rem' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
                     {b.title}
                   </div>
-                  <div style={{
-                    fontSize: 11,
-                    color: 'var(--text-muted)',
-                    lineHeight: 1.5,
-                  }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
                     {b.desc}
                   </div>
                 </div>

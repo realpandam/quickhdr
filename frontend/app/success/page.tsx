@@ -24,6 +24,22 @@ function SuccessContent() {
         if (data.paid) {
           setDownloadUrl(`${API_URL}/api/enhance/enhanced/${image_id}?preview=false`);
           setStatus('ready');
+
+          // GA4: track dokončenou platbu
+          if (typeof window !== 'undefined' && (window as any).trackEvent) {
+            (window as any).trackEvent('purchase', {
+              event_category: 'ecommerce',
+              transaction_id: gopay_id,
+              currency: 'CZK',
+              value: (data.count ?? 1) * 25,
+              items: [{
+                item_name: 'HDR fotografie',
+                quantity: data.count ?? 1,
+                price: 25,
+                currency: 'CZK',
+              }],
+            });
+          }
         } else {
           setStatus('error');
         }

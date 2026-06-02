@@ -8,14 +8,11 @@
   --text-muted: #4a4a4a;
   --border: #1f1f1f;
   --border-hover: #2f2f2f;
-
-  /* Fialový accent z loga */
   --accent: #8B5CF6;
   --accent-dark: #7C3AED;
   --accent-muted: rgba(139, 92, 246, 0.08);
   --accent-glow: rgba(139, 92, 246, 0.2);
   --accent-gradient: linear-gradient(135deg, #6B47DC 0%, #8B5CF6 50%, #A78BFA 100%);
-
   --drop-bg: #0d0d0d;
   --drop-border: #252525;
   --drop-border-active: #8B5CF6;
@@ -39,14 +36,11 @@
   --text-muted: #aaaaaa;
   --border: #e8e6e1;
   --border-hover: #d0cec9;
-
-  /* Fialový accent světlý */
   --accent: #7C3AED;
   --accent-dark: #6D28D9;
   --accent-muted: rgba(124, 58, 237, 0.08);
   --accent-glow: rgba(124, 58, 237, 0.15);
   --accent-gradient: linear-gradient(135deg, #5B21B6 0%, #7C3AED 50%, #8B5CF6 100%);
-
   --drop-bg: #f9f8f5;
   --drop-border: #dddbd6;
   --drop-border-active: #7C3AED;
@@ -67,26 +61,11 @@
   padding: 0;
 }
 
-/**Lenis Smooth scroll*/
-html {
-  scroll-behavior: auto;
-}
-
-html.lenis, html.lenis body {
-  height: auto;
-}
-
-.lenis.lenis-smooth {
-  scroll-behavior: auto !important;
-}
-
-.lenis.lenis-smooth [data-lenis-prevent] {
-  overscroll-behavior: contain;
-}
-
-.lenis.lenis-stopped {
-  overflow: hidden;
-}
+html { scroll-behavior: auto; }
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
+.lenis.lenis-stopped { overflow: hidden; }
 
 body {
   background: var(--bg);
@@ -98,27 +77,10 @@ body {
   transition: background 0.2s, color 0.2s;
 }
 
-h1,
-h2,
-h3 {
-  font-family: 'Barlow', 'Inter', sans-serif;
-  font-weight: 800;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-img {
-  max-width: 100%;
-  display: block;
-}
-
-button {
-  font-family: inherit;
-  cursor: pointer;
-}
+h1, h2, h3 { font-family: 'Barlow', 'Inter', sans-serif; font-weight: 800; }
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+button { font-family: inherit; cursor: pointer; }
 
 .btn {
   display: inline-flex;
@@ -136,7 +98,6 @@ button {
   position: relative;
   overflow: hidden;
 }
-
 .btn:hover {
   border-color: var(--accent);
   color: var(--text-primary);
@@ -144,10 +105,7 @@ button {
   transform: translateY(-1px);
   box-shadow: 0 4px 16px rgba(139, 92, 246, 0.15);
 }
-
-.btn:active {
-  transform: translateY(0px);
-}
+.btn:active { transform: translateY(0px); }
 
 .btn-primary {
   background: linear-gradient(135deg, #6B47DC 0%, #8B5CF6 60%, #A78BFA 100%);
@@ -158,7 +116,6 @@ button {
   box-shadow: 0 2px 12px rgba(107, 71, 220, 0.3);
   transition: transform 0.15s, box-shadow 0.2s, filter 0.2s;
 }
-
 .btn-primary:hover {
   background: linear-gradient(135deg, #6B47DC 0%, #8B5CF6 60%, #A78BFA 100%);
   border: none;
@@ -167,7 +124,6 @@ button {
   box-shadow: 0 6px 24px rgba(107, 71, 220, 0.5);
   filter: brightness(1.1);
 }
-
 .btn-primary:active {
   transform: translateY(0px);
   box-shadow: 0 2px 8px rgba(107, 71, 220, 0.3);
@@ -187,41 +143,19 @@ button {
   margin-bottom: 0.75rem;
 }
 
-.toggle-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-}
-
+.toggle-wrap { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .toggle-track {
-  position: relative;
-  width: 36px;
-  height: 20px;
-  background: var(--border-hover);
-  border-radius: 999px;
-  transition: background 0.2s;
-  flex-shrink: 0;
+  position: relative; width: 36px; height: 20px;
+  background: var(--border-hover); border-radius: 999px;
+  transition: background 0.2s; flex-shrink: 0;
 }
-
-.toggle-track.on {
-  background: linear-gradient(135deg, #6B47DC, #8B5CF6);
-}
-
+.toggle-track.on { background: linear-gradient(135deg, #6B47DC, #8B5CF6); }
 .toggle-thumb {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 14px;
-  height: 14px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.2s;
+  position: absolute; top: 3px; left: 3px;
+  width: 14px; height: 14px; background: #fff;
+  border-radius: 50%; transition: transform 0.2s;
 }
-
-.toggle-track.on .toggle-thumb {
-  transform: translateX(16px);
-}
+.toggle-track.on .toggle-thumb { transform: translateX(16px); }
 
 .select {
   background: var(--bg-tertiary);
@@ -235,54 +169,21 @@ button {
   outline: none;
   transition: border-color 0.15s;
 }
+.select:focus { border-color: var(--accent); }
 
-.select:focus {
-  border-color: var(--accent);
-}
-
-/* Fade in animace */
 @keyframes fadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+.fade-up { animation: fadeUp 0.6s ease forwards; }
+.fade-up-1 { animation-delay: 0.1s; opacity: 0; }
+.fade-up-2 { animation-delay: 0.25s; opacity: 0; }
+.fade-up-3 { animation-delay: 0.4s; opacity: 0; }
 
-.fade-up {
-  animation: fadeUp 0.6s ease forwards;
-}
-
-.fade-up-1 {
-  animation-delay: 0.1s;
-  opacity: 0;
-}
-
-.fade-up-2 {
-  animation-delay: 0.25s;
-  opacity: 0;
-}
-
-.fade-up-3 {
-  animation-delay: 0.4s;
-  opacity: 0;
-}
-
-/* Shimmer skeleton */
 @keyframes shimmer {
-  0% {
-    background-position: -400px 0;
-  }
-
-  100% {
-    background-position: 400px 0;
-  }
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
 }
-
 .skeleton {
   background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--bg-tertiary) 50%, var(--bg-secondary) 75%);
   background-size: 800px 100%;
@@ -290,224 +191,71 @@ button {
   border-radius: var(--radius);
 }
 
-/* Before/after slider */
-.ba-container {
-  position: relative;
-  overflow: hidden;
-  border-radius: var(--radius);
-  cursor: ew-resize;
-  user-select: none;
-}
-
-.ba-after {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-}
-
-.ba-divider {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--accent);
-  cursor: ew-resize;
-  z-index: 10;
-}
-
+.ba-container { position: relative; overflow: hidden; border-radius: var(--radius); cursor: ew-resize; user-select: none; }
+.ba-after { position: absolute; inset: 0; overflow: hidden; }
+.ba-divider { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); cursor: ew-resize; z-index: 10; }
 .ba-handle {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #000;
-  font-size: 14px;
-  font-weight: 700;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 36px; height: 36px; border-radius: 50%; background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  color: #000; font-size: 14px; font-weight: 700; box-shadow: 0 2px 12px rgba(0,0,0,0.4);
 }
-
 .ba-label {
-  position: absolute;
-  top: 12px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  color: #fff;
+  position: absolute; top: 12px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 10px;
+  border-radius: 999px; background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px); color: #fff;
 }
 
 @keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(40px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-
-.animate-slide-up {
-  animation: slideUp 0.6s ease forwards;
-}
-
-.animate-slide-up-1 {
-  animation-delay: 0s;
-}
-
-.animate-slide-up-2 {
-  animation-delay: 0.12s;
-}
-
-.animate-slide-up-3 {
-  animation-delay: 0.24s;
-}
-
-.animate-slide-up-4 {
-  animation-delay: 0.36s;
-}
-
-@media (max-width: 768px) {
-
-  /* SettingsPanel grid — 1 sloupec na mobilu */
-  #editor .select {
-    width: 100%;
-  }
-}
-
-@media (max-width: 768px) {
-
-  /* Hero sekce — méně padding nahoře */
-  #editor {
-    padding-top: 3rem !important;
-    padding-bottom: 3rem !important;
-  }
-}
-
-@media (max-width: 600px) {
-
-  /* Dashboard search — full width */
-  input[placeholder="Hledat podle názvu..."] {
-    min-width: unset !important;
-    width: 100% !important;
-  }
-}
-
-@media (max-width: 600px) {
-
-  /* Dashboard filtry — search přes celou šířku */
-  .dashboard-filters {
-    flex-direction: column;
-    align-items: stretch !important;
-  }
-
-  .dashboard-filters input,
-  .dashboard-filters .select {
-    width: 100% !important;
-    min-width: 0 !important;
-  }
-
-  .dashboard-filters span {
-    text-align: right;
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: -400px 0;
-  }
-
-  100% {
-    background-position: 400px 0;
-  }
-}
+.animate-slide-up { animation: slideUp 0.6s ease forwards; }
+.animate-slide-up-1 { animation-delay: 0s; }
+.animate-slide-up-2 { animation-delay: 0.12s; }
+.animate-slide-up-3 { animation-delay: 0.24s; }
+.animate-slide-up-4 { animation-delay: 0.36s; }
 
 #editor {
   position: relative;
   overflow: hidden;
 }
-
-/* Section background s glow */
 #editor::before {
   content: '';
   position: absolute;
-  top: 50%;
-  left: 50%;
+  top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  width: 800px;
-  height: 500px;
+  width: 800px; height: 500px;
   background: radial-gradient(ellipse, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
   pointer-events: none;
   animation: editorGlow 8s ease-in-out infinite;
   z-index: 0;
 }
-
 @keyframes editorGlow {
-
-  0%,
-  100% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
-
-  50% {
-    opacity: 0.7;
-    transform: translate(-50%, -50%) scale(1.08);
-  }
+  0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 0.7; transform: translate(-50%, -50%) scale(1.08); }
 }
 
-.uploader-section {
-  position: relative;
-  overflow: hidden;
-}
-
+.uploader-section { position: relative; overflow: hidden; }
 .uploader-section::before {
   content: '';
   position: absolute;
-  top: 30%;
-  left: 50%;
+  top: 30%; left: 50%;
   transform: translate(-50%, -50%);
-  width: 800px;
-  height: 500px;
+  width: 800px; height: 500px;
   background: radial-gradient(ellipse, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
   pointer-events: none;
   animation: uploaderGlow 8s ease-in-out infinite;
   z-index: 0;
 }
-
-.uploader-section>* {
-  position: relative;
-  z-index: 1;
-}
-
+.uploader-section > * { position: relative; z-index: 1; }
 @keyframes uploaderGlow {
-
-  0%,
-  100% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
-
-  50% {
-    opacity: 0.7;
-    transform: translate(-50%, -50%) scale(1.08);
-  }
+  0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 0.7; transform: translate(-50%, -50%) scale(1.08); }
 }
 
 /* ============ DROP ZONE ============ */
-
 .dz-modern {
   display: flex !important;
   flex-direction: column !important;
@@ -520,188 +268,90 @@ button {
   position: relative !important;
   overflow: hidden !important;
   cursor: pointer !important;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* FIX: backdrop-filter odstraněn — vizuálně není potřeba, ale zbytečně zatěžuje GPU */
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(139, 92, 246, 0.08) inset !important;
   margin-bottom: 2rem !important;
 }
-
 .dz-modern:hover {
   border-color: rgba(139, 92, 246, 0.6) !important;
   background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(167, 139, 250, 0.04)) !important;
   transform: scale(1.005);
   box-shadow: 0 32px 80px rgba(139, 92, 246, 0.15), 0 0 0 1px rgba(139, 92, 246, 0.2) inset !important;
 }
-
 .dz-modern.dz-dragging {
   border-color: var(--accent) !important;
   background: linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(167, 139, 250, 0.08)) !important;
   transform: scale(1.01);
   box-shadow: 0 32px 80px rgba(139, 92, 246, 0.25), 0 0 0 2px rgba(139, 92, 246, 0.4) inset !important;
 }
+.dz-modern.dz-disabled { opacity: 0.5 !important; cursor: not-allowed !important; pointer-events: none !important; }
 
-.dz-modern.dz-disabled {
-  opacity: 0.5 !important;
-  cursor: not-allowed !important;
-  pointer-events: none !important;
-}
-
-/* Scanning line */
 .dz-modern::before {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  height: 2px;
+  left: 0; right: 0; height: 2px;
   background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.7), transparent);
   animation: dzScan 4s linear infinite;
-  top: 0;
-  pointer-events: none;
-  z-index: 1;
+  top: 0; pointer-events: none; z-index: 1;
 }
-
 @keyframes dzScan {
-  from {
-    top: 0;
-    opacity: 0;
-  }
-
-  10% {
-    opacity: 1;
-  }
-
-  90% {
-    opacity: 1;
-  }
-
-  to {
-    top: 100%;
-    opacity: 0;
-  }
+  from { top: 0; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  to { top: 100%; opacity: 0; }
 }
-
-/* Corner glow */
 .dz-modern::after {
   content: '';
   position: absolute;
-  top: -100px;
-  right: -100px;
-  width: 300px;
-  height: 300px;
+  top: -100px; right: -100px;
+  width: 300px; height: 300px;
   background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
   pointer-events: none;
 }
-
-/* Ensure inner content above effects */
-.dz-modern>* {
-  position: relative;
-  z-index: 2;
-}
-
-/* ============ DROP ZONE INNER ============ */
+.dz-modern > * { position: relative; z-index: 2; }
 
 .dz-icon {
-  width: 80px !important;
-  height: 80px !important;
+  width: 80px !important; height: 80px !important;
   border-radius: 22px !important;
   background: linear-gradient(135deg, rgba(107, 71, 220, 0.25), rgba(167, 139, 250, 0.18)) !important;
   border: 1px solid rgba(139, 92, 246, 0.5) !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 36px !important;
-  margin-bottom: 1.5rem !important;
+  display: flex !important; align-items: center !important; justify-content: center !important;
+  font-size: 36px !important; margin-bottom: 1.5rem !important;
   color: #A78BFA !important;
   box-shadow: 0 12px 32px rgba(139, 92, 246, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
   animation: dzIconFloat 3s ease-in-out infinite !important;
   position: relative !important;
 }
-
 .dz-icon::before {
-  content: '';
-  position: absolute;
-  inset: -8px;
-  border-radius: 26px;
+  content: ''; position: absolute; inset: -8px; border-radius: 26px;
   border: 1px solid rgba(139, 92, 246, 0.25);
-  animation: dzRipple 2.5s ease-out infinite;
-  pointer-events: none;
+  animation: dzRipple 2.5s ease-out infinite; pointer-events: none;
 }
-
 .dz-icon::after {
-  content: '';
-  position: absolute;
-  inset: -16px;
-  border-radius: 30px;
+  content: ''; position: absolute; inset: -16px; border-radius: 30px;
   border: 1px solid rgba(139, 92, 246, 0.12);
-  animation: dzRipple 2.5s ease-out 0.5s infinite;
-  pointer-events: none;
+  animation: dzRipple 2.5s ease-out 0.5s infinite; pointer-events: none;
 }
-
 @keyframes dzRipple {
-  0% {
-    opacity: 0.7;
-    transform: scale(1);
-  }
-
-  100% {
-    opacity: 0;
-    transform: scale(1.3);
-  }
+  0% { opacity: 0.7; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.3); }
 }
-
 @keyframes dzIconFloat {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-8px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
 }
 
-.dz-title {
-  font-size: clamp(1.1rem, 2.5vw, 1.5rem) !important;
-  font-weight: 700 !important;
-  color: var(--text-primary) !important;
-  margin-bottom: 0.4rem !important;
-  letter-spacing: -0.02em !important;
-}
-
-.dz-subtitle {
-  font-size: 14px !important;
-  color: var(--text-secondary) !important;
-  margin-bottom: 1rem !important;
-}
-
-.dz-formats {
-  font-size: 12px !important;
-  color: var(--text-muted) !important;
-  max-width: 480px !important;
-  text-align: center !important;
-  line-height: 1.6 !important;
-  letter-spacing: 0.02em !important;
-}
-
-/* ============ TABLE ============ */
+.dz-title { font-size: clamp(1.1rem, 2.5vw, 1.5rem) !important; font-weight: 700 !important; color: var(--text-primary) !important; margin-bottom: 0.4rem !important; letter-spacing: -0.02em !important; }
+.dz-subtitle { font-size: 14px !important; color: var(--text-secondary) !important; margin-bottom: 1rem !important; }
+.dz-formats { font-size: 12px !important; color: var(--text-muted) !important; max-width: 480px !important; text-align: center !important; line-height: 1.6 !important; letter-spacing: 0.02em !important; }
 
 .upload-table-wrap {
   background: var(--bg-card);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(139, 92, 246, 0.05) inset;
 }
-
-.upload-row:hover {
-  background: var(--bg-secondary) !important;
-}
-
-.upload-row:hover td>div {
-  border-color: rgba(139, 92, 246, 0.3);
-  transform: scale(1.03);
-}
-
-/* ============ UPLOADER TITLE ============ */
+.upload-row:hover { background: var(--bg-secondary) !important; }
+.upload-row:hover td > div { border-color: rgba(139, 92, 246, 0.3); transform: scale(1.03); }
 
 .uploader-title {
   background: linear-gradient(135deg, var(--text-primary) 0%, rgba(167, 139, 250, 0.9) 100%);
@@ -711,25 +361,8 @@ button {
   display: inline-block;
 }
 
-/* ============ RESPONSIVE ============ */
+body { position: relative; }
 
-@media (max-width: 600px) {
-  .dz-modern {
-    padding: 2.5rem 1.5rem !important;
-  }
-
-  .dz-icon {
-    width: 64px !important;
-    height: 64px !important;
-    font-size: 28px !important;
-  }
-}
-
-body {
-  position: relative;
-}
-
-/* Hlavní blueprint vrstva */
 body::before {
   content: '';
   position: fixed;
@@ -746,7 +379,7 @@ body::before {
   -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 30%, transparent 90%);
 }
 
-/* Mouse glow */
+/* FIX: mouse glow throttlován v JS přes rAF, zde jen definice */
 .mouse-glow {
   position: fixed;
   inset: 0;
@@ -761,96 +394,88 @@ body::before {
   transition: background 0.1s ease;
 }
 
-main, header, footer, nav, section {
-  position: relative;
-  z-index: 2;
-}
+main, header, footer, nav, section { position: relative; z-index: 2; }
 
 /* ============================================
-   GLASS CARD - reusable třída pro liquid glass design
+   GLASS CARD
+   FIX: backdrop-filter odstraněn ze základní třídy.
+   Backdrop-filter + animované prvky za ním = GPU killer (14fps → 60fps).
+   Blur je zachován pouze přes .glass-card--blur modifikátor pro hero kartu.
    ============================================ */
-
 .glass-card {
   position: relative;
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.04), rgba(167, 139, 250, 0.02));
+  /* Tmavá základna + jemný fialový overlay — shodné s původním vizuálem */
+  background-color: #07060d;
+  background-image: linear-gradient(135deg, rgba(107, 71, 220, 0.06), rgba(139, 92, 246, 0.03));
   border: 1px solid rgba(139, 92, 246, 0.12);
   border-radius: 24px;
-  backdrop-filter: blur(24px) saturate(1.4);
   box-shadow:
     0 30px 80px rgba(0, 0, 0, 0.3),
     0 0 0 1px rgba(139, 92, 246, 0.06) inset;
   overflow: hidden;
 }
 
-/* Animovaný shimmer top border */
+/* Blur modifikátor — použij POUZE kde je to vizuálně klíčové
+   a kde za kartou NENÍ mnoho animovaných prvků */
+.glass-card--blur {
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+}
+
 .glass-card::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
+  top: 0; left: 0; right: 0; height: 2px;
   background: linear-gradient(90deg, transparent, #6B47DC, #A78BFA, #6B47DC, transparent);
   background-size: 200% 100%;
   animation: glassShimmer 4s linear infinite;
   z-index: 1;
 }
-
 @keyframes glassShimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
-
-/* Corner glow */
 .glass-card::after {
   content: '';
   position: absolute;
-  top: -80px;
-  right: -80px;
-  width: 240px;
-  height: 240px;
+  top: -80px; right: -80px;
+  width: 240px; height: 240px;
   background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, transparent 70%);
   pointer-events: none;
   animation: glassOrbPulse 6s ease-in-out infinite;
 }
-
 @keyframes glassOrbPulse {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.2); opacity: 0.6; }
 }
+.glass-card > * { position: relative; z-index: 2; }
 
-.glass-card > * {
-  position: relative;
-  z-index: 2;
-}
-
-/* Lehčí varianta bez shimmeru (pro vnořené prvky) */
+/* FIX: glass-card-soft také bez backdrop-filter */
 .glass-card-soft {
   position: relative;
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.03), rgba(167, 139, 250, 0.015));
+  background-color: #07060d;
+  background-image: linear-gradient(135deg, rgba(107, 71, 220, 0.04), rgba(139, 92, 246, 0.02));
   border: 1px solid rgba(139, 92, 246, 0.1);
   border-radius: 20px;
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
 }
 
-/* Light mode adjustments */
 [data-theme="light"] body::before {
   opacity: 0.4;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 1200'%3E%3Cdefs%3E%3Cpattern id='grid' width='40' height='40' patternUnits='userSpaceOnUse'%3E%3Cpath d='M 40 0 L 0 0 0 40' fill='none' stroke='rgba(124,58,237,0.08)' stroke-width='0.5'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width='100%25' height='100%25' fill='url(%23grid)'/%3E%3Cg stroke='rgba(124,58,237,0.25)' fill='none' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M 200 200 L 1400 200 L 1400 1000 L 200 1000 Z'/%3E%3Cpath d='M 200 550 L 850 550'/%3E%3Cpath d='M 850 200 L 850 1000'/%3E%3Cpath d='M 1100 200 L 1100 550'/%3E%3Cpath d='M 850 550 L 1400 550'/%3E%3Cpath d='M 200 800 L 600 800'/%3E%3Cpath d='M 600 800 L 600 1000'/%3E%3Cpath d='M 1100 750 L 1400 750'/%3E%3C/g%3E%3Cg stroke='rgba(124,58,237,0.3)' fill='none' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M 470 550 A 60 60 0 0 1 530 490'/%3E%3Cpath d='M 950 1000 A 60 60 0 0 1 1010 940'/%3E%3Cpath d='M 1100 670 A 50 50 0 0 0 1150 720'/%3E%3Cpath d='M 600 880 A 50 50 0 0 1 650 930'/%3E%3C/g%3E%3Cg stroke='rgba(124,58,237,0.5)' stroke-width='5' stroke-linecap='round'%3E%3Cline x1='340' y1='200' x2='440' y2='200'/%3E%3Cline x1='600' y1='200' x2='720' y2='200'/%3E%3Cline x1='950' y1='200' x2='1050' y2='200'/%3E%3Cline x1='1220' y1='200' x2='1340' y2='200'/%3E%3Cline x1='200' y1='320' x2='200' y2='420'/%3E%3Cline x1='200' y1='660' x2='200' y2='760'/%3E%3Cline x1='1400' y1='320' x2='1400' y2='420'/%3E%3Cline x1='1400' y1='840' x2='1400' y2='940'/%3E%3Cline x1='340' y1='1000' x2='460' y2='1000'/%3E%3Cline x1='1180' y1='1000' x2='1310' y2='1000'/%3E%3C/g%3E%3Cg fill='rgba(124,58,237,0.6)' font-size='18' font-family='monospace' font-weight='500' letter-spacing='3' text-anchor='middle'%3E%3Ctext x='525' y='385'%3EOBÝVÁCÍ POKOJ%3C/text%3E%3Ctext x='1125' y='385'%3EKUCHYNĚ%3C/text%3E%3Ctext x='525' y='690'%3ELOŽNICE%3C/text%3E%3Ctext x='400' y='910'%3EKOUPELNA%3C/text%3E%3Ctext x='1000' y='790'%3EPRACOVNA%3C/text%3E%3Ctext x='1250' y='790'%3EŠATNA%3C/text%3E%3C/g%3E%3Cg stroke='rgba(124,58,237,0.35)' stroke-width='1.2' fill='rgba(124,58,237,0.6)' font-size='14' font-family='monospace'%3E%3Cline x1='200' y1='160' x2='850' y2='160'/%3E%3Cline x1='200' y1='150' x2='200' y2='170'/%3E%3Cline x1='850' y1='150' x2='850' y2='170'/%3E%3Ctext x='525' y='148' text-anchor='middle'%3E6500 mm%3C/text%3E%3Cline x1='850' y1='160' x2='1400' y2='160'/%3E%3Cline x1='1400' y1='150' x2='1400' y2='170'/%3E%3Ctext x='1125' y='148' text-anchor='middle'%3E5500 mm%3C/text%3E%3Cline x1='1450' y1='200' x2='1450' y2='1000'/%3E%3Cline x1='1440' y1='200' x2='1460' y2='200'/%3E%3Cline x1='1440' y1='1000' x2='1460' y2='1000'/%3E%3Ctext x='1480' y='600' transform='rotate(90 1480 600)' text-anchor='middle'%3E8000 mm%3C/text%3E%3C/g%3E%3Cg stroke='rgba(124,58,237,0.5)' stroke-width='2' fill='none' stroke-linecap='round'%3E%3Crect x='280' y='290' width='80' height='40' rx='2'/%3E%3Crect x='1250' y='290' width='80' height='40' rx='2'/%3E%3Crect x='280' y='620' width='80' height='40' rx='2'/%3E%3Cpath d='M 980 700 L 1080 700 L 1080 660 L 980 660 Z'/%3E%3Cpath d='M 980 660 L 1080 700' stroke-width='1'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 [data-theme="light"] .glass-card {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.6));
+  background: rgba(255, 255, 255, 0.97);
   border-color: rgba(124, 58, 237, 0.18);
-  box-shadow:
-    0 30px 80px rgba(0, 0, 0, 0.08),
-    0 0 0 1px rgba(124, 58, 237, 0.08) inset;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(124, 58, 237, 0.08) inset;
 }
-
+[data-theme="light"] .glass-card--blur {
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+}
 [data-theme="light"] .glass-card-soft {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.5));
+  background: rgba(255, 255, 255, 0.95);
   border-color: rgba(124, 58, 237, 0.12);
 }
 
@@ -863,12 +488,8 @@ main, header, footer, nav, section {
   mix-blend-mode: multiply;
 }
 
-/* Mobile */
 @media (max-width: 768px) {
-  body::before {
-    opacity: 0.4;
-    background-size: 150% auto;
-  }
+  body::before { opacity: 0.4; background-size: 150% auto; }
   .mouse-glow {
     background: radial-gradient(
       400px circle at var(--mx, 50%) var(--my, 50%),
@@ -876,7 +497,16 @@ main, header, footer, nav, section {
       transparent 60%
     );
   }
-  .glass-card {
-    border-radius: 20px;
-  }
+  .glass-card { border-radius: 20px; }
+  #editor { padding-top: 3rem !important; padding-bottom: 3rem !important; }
+  #editor .select { width: 100%; }
+}
+
+@media (max-width: 600px) {
+  .dz-modern { padding: 2.5rem 1.5rem !important; }
+  .dz-icon { width: 64px !important; height: 64px !important; font-size: 28px !important; }
+  input[placeholder="Hledat podle názvu..."] { min-width: unset !important; width: 100% !important; }
+  .dashboard-filters { flex-direction: column; align-items: stretch !important; }
+  .dashboard-filters input, .dashboard-filters .select { width: 100% !important; min-width: 0 !important; }
+  .dashboard-filters span { text-align: right; }
 }

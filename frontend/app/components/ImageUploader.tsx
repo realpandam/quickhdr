@@ -37,6 +37,13 @@ const DEFAULT_SETTINGS: Settings = {
 
 const HDR_GROUP_CONCURRENCY = 3;
 
+// ── GA4 helper ────────────────────────────────────────────────────────────────
+const trackEvent = (name: string, params?: Record<string, unknown>) => {
+  if (typeof window !== 'undefined' && (window as any).trackEvent) {
+    (window as any).trackEvent(name, params ?? {});
+  }
+};
+
 const getSessionId = (): string => {
   const key = 'fasthdr_session_id';
   let sessionId = sessionStorage.getItem(key);
@@ -148,6 +155,13 @@ export default function ImageUploader() {
       }
       const { image_id } = await uploadRes.json();
 
+      // GA4: track úspěšný upload fotografie
+      trackEvent('upload_complete', {
+        event_category: 'engagement',
+        file_type: item.file.name.split('.').pop()?.toLowerCase() ?? 'unknown',
+        file_size_mb: parseFloat((item.file.size / (1024 * 1024)).toFixed(1)),
+      });
+
       if (!user) {
         window.location.href = `/order/${image_id}`;
         return;
@@ -238,6 +252,13 @@ export default function ImageUploader() {
         }),
       });
 
+      // GA4: track úspěšný HDR upload
+      trackEvent('hdr_upload_complete', {
+        event_category: 'engagement',
+        bracket_count: items.length,
+        brackets_setting: currentSettings.hdr_brackets,
+      });
+
       if (!user) {
         onOrderReady?.(order_id);
         return;
@@ -258,6 +279,15 @@ export default function ImageUploader() {
       setCheckoutLoading(true);
       const imageId = photo.enhancedUrl?.split('/').at(-1)?.split('?')[0];
       if (!imageId) return;
+
+      // GA4: track začátek platby
+      trackEvent('begin_checkout', {
+        event_category: 'ecommerce',
+        currency: 'CZK',
+        value: 25,
+        item_name: photo.file.name,
+      });
+
       const { data: { user } } = await supabase.auth.getUser();
       const res = await fetch(`${API_URL}/api/payments/create-checkout`, {
         method: 'POST',
