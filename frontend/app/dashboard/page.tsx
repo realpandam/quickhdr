@@ -149,6 +149,13 @@ export default function DashboardPage() {
   const [editingValue, setEditingValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
 
+  // Potvrzovací dialog pro mazání
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+
   // Sledujeme které image_id se úspěšně načetly (= Autoenhance zpracoval)
   // Skupina je "processing" dokud se aspoň jedna fotka nenačte
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
@@ -333,18 +340,33 @@ export default function DashboardPage() {
     setSelectedOrders(prev => { const next = new Set(prev); next.delete(orderId); return next; });
   };
 
-  const handleDeleteBatch = async (batchOrders: Order[]) => {
-    const ids = batchOrders.map(o => o.id);
-    await supabase.from('orders').delete().in('id', ids).eq('user_id', user!.id);
-    setOrders(prev => prev.filter(o => !ids.includes(o.id)));
-    setSelectedOrders(prev => { const next = new Set(prev); ids.forEach(id => next.delete(id)); return next; });
+  const handleDeleteBatch = (batchOrders: Order[]) => {
+    const count = batchOrders.length;
+    setConfirmDialog({
+      title: 'Smazat skupinu?',
+      message: `Opravdu chcete smazat ${count === 1 ? 'tuto fotografii' : `všech ${count} fotografií`}? Tato akce je nevratná.`,
+      onConfirm: async () => {
+        const ids = batchOrders.map(o => o.id);
+        await supabase.from('orders').delete().in('id', ids).eq('user_id', user!.id);
+        setOrders(prev => prev.filter(o => !ids.includes(o.id)));
+        setSelectedOrders(prev => { const next = new Set(prev); ids.forEach(id => next.delete(id)); return next; });
+        setConfirmDialog(null);
+      },
+    });
   };
 
-  const handleDeleteExpired = async () => {
+  const handleDeleteExpired = () => {
     const expiredIds = orders.filter(o => new Date(o.expires_at) < new Date()).map(o => o.id);
-    await supabase.from('orders').delete().in('id', expiredIds).eq('user_id', user!.id);
-    setOrders(prev => prev.filter(o => new Date(o.expires_at) >= new Date()));
-    setSelectedOrders(prev => { const next = new Set(prev); expiredIds.forEach(id => next.delete(id)); return next; });
+    setConfirmDialog({
+      title: 'Smazat vypršené fotografie?',
+      message: `Opravdu chcete smazat ${expiredIds.length} vypršených fotografií? Tato akce je nevratná.`,
+      onConfirm: async () => {
+        await supabase.from('orders').delete().in('id', expiredIds).eq('user_id', user!.id);
+        setOrders(prev => prev.filter(o => new Date(o.expires_at) >= new Date()));
+        setSelectedOrders(prev => { const next = new Set(prev); expiredIds.forEach(id => next.delete(id)); return next; });
+        setConfirmDialog(null);
+      },
+    });
   };
 
   const getCountdown = (expiresAt: string) => {
@@ -857,7 +879,7 @@ export default function DashboardPage() {
                               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                                 {group.paidCount} z {group.totalCount} zaplaceno · {group.orders.reduce((s, o) => s + (o.amount_czk || 0), 0)} Kč celkem
                               </span>
-                              {batchExpired && (
+                              {batchExpired && !groupProcessing && (
                                 <button onClick={() => handleDeleteBatch(group.orders)} style={{ padding: '6px 14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
                                   🗑 Smazat skupinu
                                 </button>
@@ -897,6 +919,43 @@ export default function DashboardPage() {
           </>
         )}
       </div>
+
+      {/* Potvrzovací dialog */}
+      {confirmDialog && (
+        <div
+          onClick={() => setConfirmDialog(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.15s ease' }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: '1.75rem 2rem', width: 360, maxWidth: '90vw', boxShadow: '0 30px 80px rgba(0,0,0,0.5)', animation: 'zoomIn 0.2s cubic-bezier(0.34,1.56,0.64,1)' }}
+          >
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(239,68,68,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, marginBottom: '1rem' }}>
+              🗑
+            </div>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px' }}>
+              {confirmDialog.title}
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 1.5rem', lineHeight: 1.6 }}>
+              {confirmDialog.message}
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setConfirmDialog(null)}
+                style={{ padding: '8px 18px', background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}
+              >
+                Zrušit
+              </button>
+              <button
+                onClick={confirmDialog.onConfirm}
+                style={{ padding: '8px 18px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'inherit' }}
+              >
+                Smazat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Lightbox */}
       {lightbox && currentLightboxOrder && (
