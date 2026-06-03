@@ -70,7 +70,6 @@ function getMimeType(filename: string, fallback: string): string {
 }
 
 // ── Helper: omezené paralelní zpracování ─────────────────────────────────────
-// Spustí max `concurrency` úloh najednou, ostatní čekají ve frontě.
 async function pLimit<T>(
   items: T[],
   concurrency: number,
@@ -323,24 +322,58 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
   (async () => {
     try {
       // ── Helper: streamuj soubor přímo z Dropboxu/GDrive na S3 ──────────────
-      // Místo načtení celého souboru do RAM (buffer) používáme stream →
-      // šetří paměť na Railway a download+upload se překrývají → ~3× rychlejší
+      // S3 nepodporuje Transfer-Encoding: chunked (vrací 501 NotImplemented).
+      // Řešení: vytáhnout Content-Length z upstream response a předat ho do PUT.
+      // Pokud upstream Content-Length chybí (stává se u GDrive), fallback na buffer.
       const streamFileToS3 = async (
         file: { url?: string; id?: string; name: string; mimeType?: string },
         upload_url: string,
         correctMime: string
       ): Promise<void> => {
-        let sourceStream: import('stream').Readable;
+        const urlParams = new URL(upload_url);
+        const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
         if (source === 'dropbox') {
           const url = (file.url as string).replace('dl=0', 'dl=1');
-          const response = await axios.get(url, {
+          const sourceResponse = await axios.get(url, {
             responseType: 'stream',
             timeout: 10 * 60 * 1000,
           });
-          sourceStream = response.data;
+
+          const contentLength = sourceResponse.headers['content-length'];
+
+          if (contentLength) {
+            // Dropbox vrátil velikost → streamujeme s Content-Length, bez chunked encoding
+            await axios.put(upload_url, sourceResponse.data, {
+              headers: {
+                'Content-Type': contentTypeFromUrl,
+                'Content-Length': contentLength,
+              },
+              maxBodyLength: Infinity,
+              maxContentLength: Infinity,
+            });
+          } else {
+            // Content-Length chybí → buffering jako fallback (bezpečné, ale vyšší RAM)
+            console.warn(`[cloud-import] Dropbox: content-length chybí pro ${file.name}, používám buffer`);
+            const chunks: Buffer[] = [];
+            await new Promise<void>((resolve, reject) => {
+              sourceResponse.data.on('data', (chunk: Buffer) => chunks.push(chunk));
+              sourceResponse.data.on('end', resolve);
+              sourceResponse.data.on('error', reject);
+            });
+            const buffer = Buffer.concat(chunks);
+            await axios.put(upload_url, buffer, {
+              headers: {
+                'Content-Type': contentTypeFromUrl,
+                'Content-Length': buffer.length,
+              },
+              maxBodyLength: Infinity,
+              maxContentLength: Infinity,
+            });
+          }
         } else {
-          const response = await axios.get(
+          // Google Drive
+          const sourceResponse = await axios.get(
             `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
             {
               headers: { Authorization: `Bearer ${access_token}` },
@@ -348,16 +381,38 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               timeout: 10 * 60 * 1000,
             }
           );
-          sourceStream = response.data;
-        }
 
-        const urlParams = new URL(upload_url);
-        const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
-        await axios.put(upload_url, sourceStream, {
-          headers: { 'Content-Type': contentTypeFromUrl },
-          maxBodyLength: Infinity,
-          maxContentLength: Infinity,
-        });
+          const contentLength = sourceResponse.headers['content-length'];
+
+          if (contentLength) {
+            await axios.put(upload_url, sourceResponse.data, {
+              headers: {
+                'Content-Type': contentTypeFromUrl,
+                'Content-Length': contentLength,
+              },
+              maxBodyLength: Infinity,
+              maxContentLength: Infinity,
+            });
+          } else {
+            // GDrive často nevrací Content-Length → buffering
+            console.warn(`[cloud-import] GDrive: content-length chybí pro ${file.name}, používám buffer`);
+            const chunks: Buffer[] = [];
+            await new Promise<void>((resolve, reject) => {
+              sourceResponse.data.on('data', (chunk: Buffer) => chunks.push(chunk));
+              sourceResponse.data.on('end', resolve);
+              sourceResponse.data.on('error', reject);
+            });
+            const buffer = Buffer.concat(chunks);
+            await axios.put(upload_url, buffer, {
+              headers: {
+                'Content-Type': contentTypeFromUrl,
+                'Content-Length': buffer.length,
+              },
+              maxBodyLength: Infinity,
+              maxContentLength: Infinity,
+            });
+          }
+        }
       };
 
       // ── HDR větev ───────────────────────────────────────────────────────────
@@ -365,7 +420,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const order_id = hdr_order_id;
 
         // Fáze 1: Registruj všechny brackety paralelně (10 najednou)
-        // Pořadí nezáleží – autoenhance seskupuje podle EXIF metadat
         const bracketUploads: { file: typeof files[0]; upload_url: string; correctMime: string }[] = [];
 
         await pLimit(files, 10, async (file) => {
@@ -385,7 +439,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         });
 
         // Fáze 2: Streamuj z Dropboxu/GDrive přímo na S3 paralelně (15 najednou)
-        // Streaming = žádný celý soubor v RAM, přenosy se překrývají → rychlejší
         await pLimit(bracketUploads, 15, async ({ file, upload_url, correctMime }) => {
           let success = false;
           for (let attempt = 0; attempt < 3 && !success; attempt++) {
@@ -439,7 +492,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         }
 
         // Fáze 1: Registruj všechny image_id u autoenhance a vlož DB záznamy paralelně (10 najednou)
-        // Musíme mít VŠECHNY záznamy v DB předem, aby webhook poznal kompletnost batche
         const prepared: {
           image_id: string;
           upload_url: string;
@@ -558,7 +610,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
     // ── 2. HDR: lookup přes hdr_order_id ─────────────────────────────────────
     } else if (order_id) {
 
-      // Idempotence: zkontroluj jestli jsme tento image_id už zpracovali
       const { data: existingById } = await supabase
         .from('orders')
         .select('id')
@@ -570,18 +621,15 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
         return;
       }
 
-      // Načti všechny řádky pro tento HDR order (seřazené od nejstaršího)
       const { data: hdrOrders } = await supabase
         .from('orders')
         .select('*')
         .eq('hdr_order_id', order_id)
         .order('created_at', { ascending: true });
 
-      // Najdi hdr_pending_ řádek (placeholder z doby před zpracováním)
       const pendingRow = (hdrOrders ?? []).find(
         (o: any) => o.image_id === `hdr_pending_${order_id}`
       );
-      // Nejstarší řádek = zdroj metadat (user_id, session_id, atd.)
       const metaRow = (hdrOrders ?? [])[0] ?? null;
 
       if (!metaRow) {
@@ -590,7 +638,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
       }
 
       if (pendingRow) {
-        // První výsledek: přepiš hdr_pending_ placeholder na reálné image_id
         await supabase
           .from('orders')
           .update({ image_id })
@@ -598,8 +645,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
         order = { ...pendingRow, image_id };
         console.log(`[webhook] HDR první výsledek: placeholder → ${image_id}`);
       } else {
-        // Další výsledky (2., 3., … N.): vlož nový čistý řádek
-        // Každý řádek = jedna výsledná zpracovaná fotka = jedna platitelná položka
         await supabase.from('orders').insert({
           image_id,
           filename: null,
@@ -622,7 +667,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
     if (!order.user_id) return;
 
     if (order_id) {
-      // HDR: pošli email až když jsou VŠECHNY výsledky zpracovány
       if (order_is_processing) return;
 
       try {
@@ -655,7 +699,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
       return;
     }
 
-    // Non-HDR: batch email pokud jsou všechny hotovy, jinak single
     if (order.upload_batch_id) {
       const { data: batchOrders } = await supabase
         .from('orders')
@@ -694,7 +737,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
       }
     }
 
-    // Single fotka
     try {
       const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
       if (userData?.user?.email) {
