@@ -16,7 +16,7 @@ declare global {
     interface Window {
         Dropbox: {
             choose: (options: {
-                success: (files: { link: string; name: string }[]) => void;
+                success: (files: { link: string; name: string; bytes: number }[]) => void;
                 cancel: () => void;
                 linkType: string;
                 multiselect: boolean;
@@ -62,7 +62,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
     // ── Odešli metadata na backend (server-to-server) ─────────────────────
     const sendToBackend = useCallback(async (
         source: 'dropbox' | 'google_drive',
-        files: { url?: string; id?: string; name: string; mimeType?: string }[],
+        files: { url?: string; id?: string; name: string; mimeType?: string; bytes?: number }[],
         token?: string,
     ) => {
         setCloudState('submitting');
@@ -119,7 +119,9 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
         if (!window.Dropbox) { console.error('Dropbox SDK is not loaded'); return; }
         window.Dropbox.choose({
             success: async (files) => {
-                const metadata = files.map(f => ({ url: f.link, name: f.name }));
+                // FIX: předáváme i bytes — backend ho použije jako Content-Length
+                // při streamu na S3, aby se vyhnul 400 chybě bez bufferu.
+                const metadata = files.map(f => ({ url: f.link, name: f.name, bytes: f.bytes }));
                 await sendToBackend('dropbox', metadata);
                 document.getElementById('editor')?.scrollIntoView({ behavior: 'smooth' });
             },
@@ -142,7 +144,6 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                     if (!api?.ViewId) { console.error('Google Picker API není dostupné'); return; }
 
                     const docsView = new api.DocsView(api.ViewId.DOCS);
-                    // FIX: zobraz složky v pickeru a umožni procházení
                     docsView.setIncludeFolders(true);
                     docsView.setSelectFolderEnabled(true);
 

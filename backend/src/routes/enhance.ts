@@ -321,12 +321,25 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
   // ── Background zpracování ─────────────────────────────────────────────────
   (async () => {
     try {
+
       // ── Helper: streamuj soubor přímo z Dropboxu/GDrive na S3 ──────────────
-      // FIX: decompress: false zabraňuje tomu, aby axios dekomprimoval gzip stream
-      // z Dropboxu. Bez toho Content-Length odpovídá komprimované velikosti, ale
-      // skutečně přenesených bytů je víc (dekomprimovaná data) → S3 vrátí 400.
+      //
+      // FIX (Krok 2): místo arraybuffer + Buffer.from() používáme stream.
+      //
+      // Dropbox (Chooser):
+      //   - stahujeme přes responseType: 'stream' — data tečou rovnou do S3 PUT
+      //   - Content-Length bereme z file.bytes (Chooser ho vždy vrací)
+      //   - žádný gzip mismatch: decompress: false zajistí, že axios neprovede
+      //     transparentní dekomprimaci a Content-Length odpovídá přesně tomu,
+      //     co Dropbox pošle (komprimovaná data přepošleme 1:1 na S3)
+      //   - bez file.bytes fallback na arraybuffer (bezpečnostní síť)
+      //
+      // Google Drive:
+      //   - GDrive nevrací spolehlivý Content-Length → zůstává arraybuffer,
+      //     ale jen pro GDrive; RAM zátěž je nižší díky snížené concurrency
+      //
       const streamFileToS3 = async (
-        file: { url?: string; id?: string; name: string; mimeType?: string },
+        file: { url?: string; id?: string; name: string; mimeType?: string; bytes?: number },
         upload_url: string,
         correctMime: string
       ): Promise<void> => {
@@ -334,25 +347,48 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
         if (source === 'dropbox') {
-          // Buffer-always: stáhneme celý soubor do paměti a použijeme buffer.length
-          // jako Content-Length. 100% spolehlivé — žádný mismatch mezi hlavičkou
-          // a skutečnými přenesenými byty není možný.
           const url = (file.url as string).replace('dl=0', 'dl=1');
-          const sourceResponse = await axios.get(url, {
-            responseType: 'arraybuffer',
-            timeout: 10 * 60 * 1000,
-          });
-          const buffer = Buffer.from(sourceResponse.data);
-          await axios.put(upload_url, buffer, {
-            headers: {
-              'Content-Type': contentTypeFromUrl,
-              'Content-Length': buffer.length,
-            },
-            maxBodyLength: Infinity,
-            maxContentLength: Infinity,
-          });
+
+          if (file.bytes && file.bytes > 0) {
+            // ── Streamovaný upload (hlavní cesta) ──────────────────────────
+            // Dropbox Chooser vždy vrací bytes → použijeme stream + Content-Length.
+            // decompress: false = axios neprovede transparentní gunzip,
+            // takže Content-Length z file.bytes odpovídá skutečně přeneseným bytům.
+            const sourceResponse = await axios.get(url, {
+              responseType: 'stream',
+              decompress: false,
+              timeout: 10 * 60 * 1000,
+            });
+            await axios.put(upload_url, sourceResponse.data, {
+              headers: {
+                'Content-Type': contentTypeFromUrl,
+                'Content-Length': file.bytes,
+              },
+              maxBodyLength: Infinity,
+              maxContentLength: Infinity,
+            });
+          } else {
+            // ── Fallback: arraybuffer (kdyby bytes chybělo) ────────────────
+            // Nemělo by nastat — Chooser bytes vždy posílá — ale pro jistotu.
+            console.warn(`[cloud-import] ${file.name}: chybí bytes, fallback na arraybuffer`);
+            const sourceResponse = await axios.get(url, {
+              responseType: 'arraybuffer',
+              timeout: 10 * 60 * 1000,
+            });
+            const buffer = Buffer.from(sourceResponse.data);
+            await axios.put(upload_url, buffer, {
+              headers: {
+                'Content-Type': contentTypeFromUrl,
+                'Content-Length': buffer.length,
+              },
+              maxBodyLength: Infinity,
+              maxContentLength: Infinity,
+            });
+          }
         } else {
-          // Google Drive — buffer-always (GDrive často nevrací Content-Length)
+          // ── Google Drive: arraybuffer (GDrive nevrací Content-Length) ──────
+          // Zůstává původní přístup. RAM zátěž je zvládnutelná díky nižší
+          // concurrency (5 místo 15) a Google Drive je jiná cesta bez throttlingu.
           const sourceResponse = await axios.get(
             `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
             {
@@ -396,8 +432,10 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           }
         });
 
-        // Fáze 2: Streamuj z Dropboxu/GDrive přímo na S3 paralelně (15 najednou)
-        await pLimit(bracketUploads, 15, async ({ file, upload_url, correctMime }) => {
+        // Fáze 2: Streamuj z Dropboxu/GDrive přímo na S3 paralelně
+        // FIX (Krok 4): concurrency snížena z 15 na 5 — méně paralelních
+        // stažení = méně throttlingu ze strany Dropboxu → celkově rychlejší.
+        await pLimit(bracketUploads, 5, async ({ file, upload_url, correctMime }) => {
           let success = false;
           for (let attempt = 0; attempt < 3 && !success; attempt++) {
             try {
@@ -435,7 +473,7 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
       } else if (!hdr_mode) {
         const upload_batch_id = randomUUID();
 
-        const validFiles = (files as { name: string; url?: string; id?: string; mimeType?: string }[]).filter(f => {
+        const validFiles = (files as { name: string; url?: string; id?: string; mimeType?: string; bytes?: number }[]).filter(f => {
           const ext = path.extname(f.name).toLowerCase().replace('.', '');
           if (!ALLOWED_EXTENSIONS.has(ext)) {
             console.warn(`[cloud-import] Přeskočen nepodporovaný formát: ${f.name}`);
@@ -488,13 +526,25 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
         console.log(`[cloud-import] Non-HDR: zaregistrováno ${prepared.length}/${validFiles.length} souborů (batch ${upload_batch_id})`);
 
-        // Fáze 2: Streamuj z Dropboxu/GDrive přímo na S3 paralelně (15 najednou)
-        await pLimit(prepared, 15, async (item) => {
-          try {
-            await streamFileToS3(item.file, item.upload_url, item.correctMime);
-            console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
-          } catch (uploadErr) {
-            console.error(`[cloud-import] Chyba při uploadu ${item.file.name}:`, uploadErr);
+        // Fáze 2: Streamuj z Dropboxu/GDrive přímo na S3 paralelně
+        // FIX (Krok 4): concurrency snížena z 15 na 5
+        // FIX (Krok 5): přidán retry (3 pokusy s exponenciálním backoffem)
+        //   — dříve non-HDR větev retry neměla a tiché selhání způsobovalo
+        //     ztrátu souborů bez jakékoliv zprávy v logu
+        await pLimit(prepared, 5, async (item) => {
+          let success = false;
+          for (let attempt = 0; attempt < 3 && !success; attempt++) {
+            try {
+              await streamFileToS3(item.file, item.upload_url, item.correctMime);
+              console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
+              success = true;
+            } catch (uploadErr) {
+              console.error(`[cloud-import] ${item.file.name} pokus ${attempt + 1} selhal:`, uploadErr);
+              if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+            }
+          }
+          if (!success) {
+            console.error(`[cloud-import] ${item.file.name} (${item.image_id}) selhal po 3 pokusech — soubor nebude zpracován`);
           }
         });
 
