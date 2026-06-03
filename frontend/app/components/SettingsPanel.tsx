@@ -122,19 +122,19 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             </select>
           </div>
 
-          {/* Toggles — FIX: flexWrap aby se na mobilu zalomily do jednoho sloupce */}
+          {/* Toggles — dva sloupce na desktopu, jeden sloupec na mobilu */}
           <div style={{
             gridColumn: '1 / -1',
-            display: 'flex',
-            flexWrap: 'wrap' as const,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, minmax(0, max-content))',
             gap: '0.85rem 2.5rem',
             marginTop: '0.75rem',
-          }}>
+          }} className="settings-toggles">
             <Toggle on={settings.sky_replacement} onToggle={() => set('sky_replacement', !settings.sky_replacement)} label="Výměna oblohy" />
-            <Toggle on={settings.vertical_correction} onToggle={() => set('vertical_correction', !settings.vertical_correction)} label="Srovnání linií" />
-            <Toggle on={settings.lens_correction} onToggle={() => set('lens_correction', !settings.lens_correction)} label="Korekce objektivu" />
             <Toggle on={settings.upscale} onToggle={() => set('upscale', !settings.upscale)} label="Zvýšení rozlišení" />
+            <Toggle on={settings.vertical_correction} onToggle={() => set('vertical_correction', !settings.vertical_correction)} label="Srovnání linií" />
             <Toggle on={settings.privacy} onToggle={() => set('privacy', !settings.privacy)} label="Anonymizace obličejů a SPZ" />
+            <Toggle on={settings.lens_correction} onToggle={() => set('lens_correction', !settings.lens_correction)} label="Korekce objektivu" />
           </div>
 
           {/* HDR sekce */}

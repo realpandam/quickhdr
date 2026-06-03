@@ -509,4 +509,6 @@ main, header, footer, nav, section { position: relative; z-index: 2; }
   .dashboard-filters { flex-direction: column; align-items: stretch !important; }
   .dashboard-filters input, .dashboard-filters .select { width: 100% !important; min-width: 0 !important; }
   .dashboard-filters span { text-align: right; }
+  /* Toggles — jeden sloupec na mobilu */
+  .settings-toggles { grid-template-columns: 1fr !important; }
 }
