@@ -69,6 +69,23 @@ function getMimeType(filename: string, fallback: string): string {
   return mimeMap[ext] ?? fallback;
 }
 
+// ── Helper: omezené paralelní zpracování ─────────────────────────────────────
+// Spustí max `concurrency` úloh najednou, ostatní čekají ve frontě.
+async function pLimit<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  const queue = [...items];
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift()!;
+      await fn(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
 // ── Upload (non-HDR) ──────────────────────────────────────────────────────────
 router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (req: Request, res: Response) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -302,8 +319,10 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
   res.status(202).json({ ok: true, order_id: hdr_order_id, message: 'Přijato ke zpracování' });
 
+  // ── Background zpracování ─────────────────────────────────────────────────
   (async () => {
     try {
+      // Helper: stáhni soubor z Dropboxu nebo Google Drive
       const downloadFile = async (file: { url?: string; id?: string; name: string; mimeType?: string }): Promise<Buffer> => {
         if (source === 'dropbox') {
           const url = (file.url as string).replace('dl=0', 'dl=1');
@@ -318,34 +337,54 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         }
       };
 
+      // ── HDR větev ───────────────────────────────────────────────────────────
       if (hdr_mode && hdr_order_id) {
-        // HDR: retry 3× pro každý bracket
         const order_id = hdr_order_id;
-        for (const file of files) {
+
+        // Fáze 1: Registruj všechny brackety paralelně (10 najednou)
+        // Pořadí nezáleží – autoenhance seskupuje podle EXIF metadat
+        const bracketUploads: { file: typeof files[0]; upload_url: string }[] = [];
+
+        await pLimit(files, 10, async (file) => {
+          try {
+            const bracketRes = await axios.post(
+              `${API_BASE}/v3/brackets/`,
+              { order_id, name: file.name },
+              { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } }
+            );
+            const upload_url = bracketRes.data.upload_url ?? bracketRes.data.s3PutObjectUrl;
+            if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
+            bracketUploads.push({ file, upload_url });
+          } catch (err) {
+            console.error(`[cloud-import] Chyba při registraci bracketu ${file.name}:`, err);
+          }
+        });
+
+        // Fáze 2: Stahuj z Dropboxu/GDrive a uploaduj na S3 paralelně (5 najednou)
+        // 5 proto, že každý soubor může být velký RAW (20–50 MB)
+        await pLimit(bracketUploads, 5, async ({ file, upload_url }) => {
           let success = false;
           for (let attempt = 0; attempt < 3 && !success; attempt++) {
             try {
               const buffer = await downloadFile(file);
               const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
-              const bracketRes = await axios.post(`${API_BASE}/v3/brackets/`,
-                { order_id, name: file.name },
-                { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
-              const upload_url = bracketRes.data.upload_url ?? bracketRes.data.s3PutObjectUrl;
-              if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
               const urlParams = new URL(upload_url);
               const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
               await axios.put(upload_url, buffer, {
                 headers: { 'Content-Type': contentTypeFromUrl },
                 maxBodyLength: Infinity, maxContentLength: Infinity,
               });
+              console.log(`[cloud-import] Bracket uploadnut: ${file.name}`);
               success = true;
-            } catch (fileErr) {
-              console.error(`[cloud-import] Bracket ${file.name} pokus ${attempt + 1} selhal:`, fileErr);
+            } catch (err) {
+              console.error(`[cloud-import] Bracket ${file.name} pokus ${attempt + 1} selhal:`, err);
               if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
             }
           }
-          if (!success) console.error(`[cloud-import] Bracket ${file.name} se nepodařilo nahrát po 3 pokusech`);
-        }
+          if (!success) console.error(`[cloud-import] Bracket ${file.name} selhal po 3 pokusech`);
+        });
+
+        // Fáze 3: Spusť merge až po uploadu VŠECH bracketů
         const mergeBody: Record<string, unknown> = {
           hdr: true, ai_version: '5.x', enhance: true,
           enhance_type: rawSettings.enhance_type ?? 'neutral',
@@ -354,24 +393,44 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           vertical_correction: rawSettings.vertical_correction ?? true,
           lens_correction: rawSettings.lens_correction ?? true,
           window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-          upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+          upscale: rawSettings.upscale ?? false,
+          privacy: rawSettings.privacy ?? false,
         };
-        await axios.post(`${API_BASE}/v3/orders/${order_id}/process`, mergeBody,
-          { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
-        console.log(`[cloud-import] HDR order ${order_id} spuštěn, ${files.length} bracketů`);
+        await axios.post(
+          `${API_BASE}/v3/orders/${order_id}/process`,
+          mergeBody,
+          { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } }
+        );
+        console.log(`[cloud-import] HDR order ${order_id} spuštěn, ${bracketUploads.length}/${files.length} bracketů nahráno`);
 
+      // ── Non-HDR větev ───────────────────────────────────────────────────────
       } else if (!hdr_mode) {
-        // Non-HDR: vytvoř VŠECHNY DB řádky PŘEDEM → webhook vidí kompletní batch → 1 email
         const upload_batch_id = randomUUID();
+
         const validFiles = (files as { name: string; url?: string; id?: string; mimeType?: string }[]).filter(f => {
           const ext = path.extname(f.name).toLowerCase().replace('.', '');
-          if (!ALLOWED_EXTENSIONS.has(ext)) { console.warn(`[cloud-import] Přeskočen: ${f.name}`); return false; }
+          if (!ALLOWED_EXTENSIONS.has(ext)) {
+            console.warn(`[cloud-import] Přeskočen nepodporovaný formát: ${f.name}`);
+            return false;
+          }
           return true;
         });
-        if (validFiles.length === 0) { console.warn('[cloud-import] Non-HDR: žádné podporované soubory'); return; }
 
-        const prepared: { image_id: string; upload_url: string; correctMime: string; file: typeof validFiles[0] }[] = [];
-        for (const file of validFiles) {
+        if (validFiles.length === 0) {
+          console.warn('[cloud-import] Non-HDR: žádné podporované soubory');
+          return;
+        }
+
+        // Fáze 1: Registruj všechny image_id u autoenhance a vlož DB záznamy paralelně (10 najednou)
+        // Musíme mít VŠECHNY záznamy v DB předem, aby webhook poznal kompletnost batche
+        const prepared: {
+          image_id: string;
+          upload_url: string;
+          correctMime: string;
+          file: typeof validFiles[0];
+        }[] = [];
+
+        await pLimit(validFiles, 10, async (file) => {
           try {
             const ext = path.extname(file.name).toLowerCase().replace('.', '');
             const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
@@ -385,32 +444,43 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
               upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
             }, { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+
             const { image_id, s3PutObjectUrl: upload_url } = createRes.data;
+
             await supabase.from('orders').insert({
               image_id, filename: file.name, payment_status: 'pending',
               amount_czk: PRICE_CZK, user_id: user_id || null, session_id: session_id || null,
               payment_session_id: `pending_${image_id}`, upload_batch_id,
             });
+
             prepared.push({ image_id, upload_url, correctMime, file });
           } catch (createErr) {
-            console.error(`[cloud-import] Chyba při vytváření image pro ${file.name}:`, createErr);
+            console.error(`[cloud-import] Chyba při registraci image pro ${file.name}:`, createErr);
           }
-        }
-        console.log(`[cloud-import] Non-HDR: vytvořeno ${prepared.length}/${validFiles.length} DB řádků (batch ${upload_batch_id})`);
-        for (const item of prepared) {
+        });
+
+        console.log(`[cloud-import] Non-HDR: zaregistrováno ${prepared.length}/${validFiles.length} souborů (batch ${upload_batch_id})`);
+
+        // Fáze 2: Stahuj z Dropboxu/GDrive a uploaduj na S3 paralelně (5 najednou)
+        await pLimit(prepared, 5, async (item) => {
           try {
             const buffer = await downloadFile(item.file);
             const urlParams = new URL(item.upload_url);
             const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? item.correctMime;
-            await axios.put(item.upload_url, buffer, { headers: { 'Content-Type': contentTypeFromUrl } });
+            await axios.put(item.upload_url, buffer, {
+              headers: { 'Content-Type': contentTypeFromUrl },
+            });
             console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
           } catch (uploadErr) {
             console.error(`[cloud-import] Chyba při uploadu ${item.file.name}:`, uploadErr);
           }
-        }
+        });
+
         console.log(`[cloud-import] Non-HDR batch ${upload_batch_id} dokončen, ${prepared.length} souborů`);
       }
-    } catch (err) { console.error('[cloud-import] Fatální chyba:', err); }
+    } catch (err) {
+      console.error('[cloud-import] Fatální chyba:', err);
+    }
   })();
 });
 
@@ -452,137 +522,186 @@ router.get('/cron/expiry-reminders', async (req: Request, res: Response) => {
 
 // ── Autoenhance Webhook ───────────────────────────────────────────────────────
 router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
+  // Odpověz okamžitě – autoenhance čeká na 200 OK
   res.status(200).json({ ok: true });
+
   try {
     const { event, image_id, error, order_id, order_is_processing } = req.body;
-    // DIAGNOSTIKA: loguj každý webhook payload
     console.log('[webhook] payload:', JSON.stringify({ event, image_id, order_id, order_is_processing, error }));
+
     if (event !== 'image_processed' || error) return;
 
-    let order = null;
+    let order: any = null;
 
     // ── 1. Non-HDR: přímý lookup přes image_id ───────────────────────────────
-    // maybeSingle() místo single() — single() by hodilo chybu pokud by náhodou
-    // existovaly duplicity, maybeSingle() vrátí null bezpečně.
     const { data: directOrder } = await supabase
-      .from('orders').select('*').eq('image_id', image_id).maybeSingle();
-    if (directOrder) order = directOrder;
+      .from('orders')
+      .select('*')
+      .eq('image_id', image_id)
+      .maybeSingle();
+
+    if (directOrder) {
+      order = directOrder;
 
     // ── 2. HDR: lookup přes hdr_order_id ─────────────────────────────────────
-    if (!order && order_id) {
-      // KRITICKÁ OPRAVA: původní .single() selhávalo jakmile vznikly 2+ řádky
-      // se stejným hdr_order_id (po prvním webhooku se insertuje druhý řádek →
-      // .single() vrátí chybu místo dat → handler tiše skipoval všechny další
-      // webhooky → v dashboardu vždy jen 1 fotka místo N).
-      //
-      // Oprava: načti VŠECHNY řádky seřazené dle created_at, pak:
-      //   pendingRow = řádek s hdr_pending_ prefixem (existuje jen pro 1. webhook)
-      //   metaRow    = nejstarší řádek = zdroj metadat (user_id, session_id, filename)
+    } else if (order_id) {
+
+      // Idempotence: zkontroluj jestli jsme tento image_id už zpracovali
+      const { data: existingById } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('image_id', image_id)
+        .maybeSingle();
+
+      if (existingById) {
+        // Tento výsledek už v DB existuje, přeskoč
+        console.log(`[webhook] HDR image_id ${image_id} již existuje, přeskakuji`);
+        return;
+      }
+
+      // Načti všechny řádky pro tento HDR order (seřazené od nejstaršího)
       const { data: hdrOrders } = await supabase
         .from('orders')
         .select('*')
         .eq('hdr_order_id', order_id)
         .order('created_at', { ascending: true });
 
-      const pendingRow = (hdrOrders ?? []).find((o: any) => o.image_id === `hdr_pending_${order_id}`);
+      // Najdi hdr_pending_ řádek (placeholder z doby před zpracováním)
+      const pendingRow = (hdrOrders ?? []).find(
+        (o: any) => o.image_id === `hdr_pending_${order_id}`
+      );
+      // Nejstarší řádek = zdroj metadat (user_id, session_id, atd.)
       const metaRow = (hdrOrders ?? [])[0] ?? null;
 
-      if (metaRow) {
-        if (pendingRow) {
-          // První webhook: aktualizuj hdr_pending_ řádek na reálné image_id.
-          // Cílíme přes pendingRow.id (ne eq hdr_order_id) aby se nechtěně
-          // nepřepsaly další řádky které již mají reálné image_id.
-          await supabase.from('orders').update({ image_id }).eq('id', pendingRow.id);
-          order = { ...pendingRow, image_id };
-        } else {
-          // Další webhooky (2., 3., … N.): každý výsledek = nový řádek v DB.
-          // maybeSingle() místo single() — bezpečné pokud by duplicita existovala.
-          const { data: existingResult } = await supabase
-            .from('orders').select('id').eq('image_id', image_id).maybeSingle();
-          if (!existingResult) {
-            await supabase.from('orders').insert({
-              image_id,
-              filename: metaRow.filename,
-              payment_status: 'pending',
-              amount_czk: PRICE_CZK,
-              user_id: metaRow.user_id,
-              session_id: metaRow.session_id,
-              hdr_order_id: order_id,
-              payment_session_id: `pending_${image_id}`,
-              upload_batch_id: metaRow.upload_batch_id,
-            });
-          }
-          order = { ...metaRow, image_id };
-        }
+      if (!metaRow) {
+        console.error(`[webhook] HDR order ${order_id} nenalezen v DB`);
+        return;
+      }
+
+      if (pendingRow) {
+        // První výsledek: přepiš hdr_pending_ placeholder na reálné image_id
+        await supabase
+          .from('orders')
+          .update({ image_id })
+          .eq('id', pendingRow.id);
+        order = { ...pendingRow, image_id };
+        console.log(`[webhook] HDR první výsledek: placeholder → ${image_id}`);
+      } else {
+        // Další výsledky (2., 3., … N.): vlož nový čistý řádek
+        // Každý řádek = jedna výsledná zpracovaná fotka = jedna platitelná položka
+        await supabase.from('orders').insert({
+          image_id,
+          filename: null,              // autoenhance nevrací název výsledku
+          payment_status: 'pending',
+          amount_czk: PRICE_CZK,
+          user_id: metaRow.user_id,
+          session_id: metaRow.session_id,
+          hdr_order_id: order_id,
+          payment_session_id: `pending_${image_id}`,
+          upload_batch_id: metaRow.upload_batch_id,
+        });
+        order = { ...metaRow, image_id };
+        console.log(`[webhook] HDR další výsledek vložen: ${image_id}`);
       }
     }
 
     if (!order) return;
 
     // ── 3. Email notifikace ───────────────────────────────────────────────────
-    if (order.user_id && order_id) {
-      // HDR: pošli email až když jsou VŠECHNY výsledky zpracovány
-      try {
-        const autoenhanceRes = await axios.get(`${API_BASE}/v3/orders/${order_id}`, { headers: { 'x-api-key': API_KEY } });
-        const totalImages = (autoenhanceRes.data.images ?? []).length;
-        const processedImages = (autoenhanceRes.data.images ?? []).filter((img: { status: string }) => img.status === 'processed');
-        const allHdrDone = processedImages.length === totalImages && totalImages > 0 && !autoenhanceRes.data.is_processing;
-        if (allHdrDone) {
-          const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
-          if (userData?.user?.email) {
-            await resend.emails.send({
-              from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
-              to: userData.user.email,
-              subject: `Vaše HDR fotografie jsou zpracovány ✓ (${processedImages.length} fotek)`,
-              html: notifyBatchEmailHtml(processedImages.length, GOPAY_RETURN_URL),
-            });
-          }
-        }
-      } catch (emailErr) { console.error('Chyba při odesílání HDR emailu:', emailErr); }
-      return;
-    }
+    if (!order.user_id) return;
 
-    if (order.user_id) {
-      // Non-HDR: batch email pokud všechny hotovy, jinak single
-      if (order.upload_batch_id) {
-        const { data: batchOrders } = await supabase
-          .from('orders').select('image_id').eq('upload_batch_id', order.upload_batch_id);
-        if (batchOrders && batchOrders.length > 1) {
-          const statuses = await Promise.allSettled(
-            batchOrders.map(async (o) => {
-              const r = await axios.get(`${API_BASE}/v3/images/${o.image_id}`, { headers: { 'x-api-key': API_KEY } });
-              return r.data.status as string;
-            })
-          );
-          const allDone = statuses.every((s) => s.status === 'fulfilled' && ['processed', 'failed', 'error'].includes(s.value));
-          if (!allDone) return;
-          try {
-            const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
-            if (userData?.user?.email) {
-              await resend.emails.send({
-                from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
-                to: userData.user.email,
-                subject: `Vaše fotografie jsou zpracovány ✓ (${batchOrders.length} fotek)`,
-                html: notifyBatchEmailHtml(batchOrders.length, GOPAY_RETURN_URL),
-              });
-            }
-          } catch (emailErr) { console.error('Chyba při odesílání batch emailu:', emailErr); }
-          return;
-        }
-      }
+    if (order_id) {
+      // HDR: pošli email až když jsou VŠECHNY výsledky zpracovány
+      // (order_is_processing === false znamená autoenhance skončil)
+      if (order_is_processing) return;
+
       try {
+        const autoenhanceRes = await axios.get(
+          `${API_BASE}/v3/orders/${order_id}`,
+          { headers: { 'x-api-key': API_KEY } }
+        );
+        const totalImages = (autoenhanceRes.data.images ?? []).length;
+        const processedImages = (autoenhanceRes.data.images ?? []).filter(
+          (img: { status: string }) => img.status === 'processed'
+        );
+        const allDone = processedImages.length === totalImages
+          && totalImages > 0
+          && !autoenhanceRes.data.is_processing;
+
+        if (!allDone) return;
+
         const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
         if (userData?.user?.email) {
           await resend.emails.send({
             from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
             to: userData.user.email,
-            subject: 'Vaše fotografie je zpracována ✓',
-            html: notifyEmailHtml(order.filename, image_id, GOPAY_RETURN_URL),
+            subject: `Vaše HDR fotografie jsou zpracovány ✓ (${processedImages.length} fotek)`,
+            html: notifyBatchEmailHtml(processedImages.length, GOPAY_RETURN_URL),
           });
         }
-      } catch (emailErr) { console.error('Chyba při odesílání emailu:', emailErr); }
+      } catch (emailErr) {
+        console.error('[webhook] Chyba při odesílání HDR emailu:', emailErr);
+      }
+      return;
     }
-  } catch (err) { console.error('Webhook chyba:', err); }
+
+    // Non-HDR: batch email pokud jsou všechny hotovy, jinak single
+    if (order.upload_batch_id) {
+      const { data: batchOrders } = await supabase
+        .from('orders')
+        .select('image_id')
+        .eq('upload_batch_id', order.upload_batch_id);
+
+      if (batchOrders && batchOrders.length > 1) {
+        const statuses = await Promise.allSettled(
+          batchOrders.map(async (o) => {
+            const r = await axios.get(
+              `${API_BASE}/v3/images/${o.image_id}`,
+              { headers: { 'x-api-key': API_KEY } }
+            );
+            return r.data.status as string;
+          })
+        );
+        const allDone = statuses.every(
+          (s) => s.status === 'fulfilled' && ['processed', 'failed', 'error'].includes(s.value)
+        );
+        if (!allDone) return;
+
+        try {
+          const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
+          if (userData?.user?.email) {
+            await resend.emails.send({
+              from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
+              to: userData.user.email,
+              subject: `Vaše fotografie jsou zpracovány ✓ (${batchOrders.length} fotek)`,
+              html: notifyBatchEmailHtml(batchOrders.length, GOPAY_RETURN_URL),
+            });
+          }
+        } catch (emailErr) {
+          console.error('[webhook] Chyba při odesílání batch emailu:', emailErr);
+        }
+        return;
+      }
+    }
+
+    // Single fotka
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
+      if (userData?.user?.email) {
+        await resend.emails.send({
+          from: process.env.FROM_EMAIL ?? 'noreply@fasthdr.cz',
+          to: userData.user.email,
+          subject: 'Vaše fotografie je zpracována ✓',
+          html: notifyEmailHtml(order.filename, image_id, GOPAY_RETURN_URL),
+        });
+      }
+    } catch (emailErr) {
+      console.error('[webhook] Chyba při odesílání emailu:', emailErr);
+    }
+
+  } catch (err) {
+    console.error('[webhook] Fatální chyba:', err);
+  }
 });
 
 // ── Notify (fallback) ─────────────────────────────────────────────────────────
@@ -590,7 +709,6 @@ router.post('/notify', async (req: Request, res: Response) => {
   try {
     const { user_id, filename, image_id, upload_batch_id } = req.body;
     if (!user_id || !image_id) { res.status(400).json({ error: 'Chybí user_id nebo image_id' }); return; }
-    // maybeSingle() místo single() — single() by hodilo chybu při duplicitách
     const { data: existing } = await supabase
       .from('orders').select('id').eq('image_id', image_id).maybeSingle();
     if (!existing) {
