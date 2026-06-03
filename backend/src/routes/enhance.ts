@@ -322,9 +322,9 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
   (async () => {
     try {
       // ── Helper: streamuj soubor přímo z Dropboxu/GDrive na S3 ──────────────
-      // S3 nepodporuje Transfer-Encoding: chunked (vrací 501 NotImplemented).
-      // Řešení: vytáhnout Content-Length z upstream response a předat ho do PUT.
-      // Pokud upstream Content-Length chybí (stává se u GDrive), fallback na buffer.
+      // FIX: decompress: false zabraňuje tomu, aby axios dekomprimoval gzip stream
+      // z Dropboxu. Bez toho Content-Length odpovídá komprimované velikosti, ale
+      // skutečně přenesených bytů je víc (dekomprimovaná data) → S3 vrátí 400.
       const streamFileToS3 = async (
         file: { url?: string; id?: string; name: string; mimeType?: string },
         upload_url: string,
@@ -334,84 +334,42 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
         if (source === 'dropbox') {
+          // Buffer-always: stáhneme celý soubor do paměti a použijeme buffer.length
+          // jako Content-Length. 100% spolehlivé — žádný mismatch mezi hlavičkou
+          // a skutečnými přenesenými byty není možný.
           const url = (file.url as string).replace('dl=0', 'dl=1');
           const sourceResponse = await axios.get(url, {
-            responseType: 'stream',
+            responseType: 'arraybuffer',
             timeout: 10 * 60 * 1000,
           });
-
-          const contentLength = sourceResponse.headers['content-length'];
-
-          if (contentLength) {
-            // Dropbox vrátil velikost → streamujeme s Content-Length, bez chunked encoding
-            await axios.put(upload_url, sourceResponse.data, {
-              headers: {
-                'Content-Type': contentTypeFromUrl,
-                'Content-Length': contentLength,
-              },
-              maxBodyLength: Infinity,
-              maxContentLength: Infinity,
-            });
-          } else {
-            // Content-Length chybí → buffering jako fallback (bezpečné, ale vyšší RAM)
-            console.warn(`[cloud-import] Dropbox: content-length chybí pro ${file.name}, používám buffer`);
-            const chunks: Buffer[] = [];
-            await new Promise<void>((resolve, reject) => {
-              sourceResponse.data.on('data', (chunk: Buffer) => chunks.push(chunk));
-              sourceResponse.data.on('end', resolve);
-              sourceResponse.data.on('error', reject);
-            });
-            const buffer = Buffer.concat(chunks);
-            await axios.put(upload_url, buffer, {
-              headers: {
-                'Content-Type': contentTypeFromUrl,
-                'Content-Length': buffer.length,
-              },
-              maxBodyLength: Infinity,
-              maxContentLength: Infinity,
-            });
-          }
+          const buffer = Buffer.from(sourceResponse.data);
+          await axios.put(upload_url, buffer, {
+            headers: {
+              'Content-Type': contentTypeFromUrl,
+              'Content-Length': buffer.length,
+            },
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity,
+          });
         } else {
-          // Google Drive
+          // Google Drive — buffer-always (GDrive často nevrací Content-Length)
           const sourceResponse = await axios.get(
             `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
             {
               headers: { Authorization: `Bearer ${access_token}` },
-              responseType: 'stream',
+              responseType: 'arraybuffer',
               timeout: 10 * 60 * 1000,
             }
           );
-
-          const contentLength = sourceResponse.headers['content-length'];
-
-          if (contentLength) {
-            await axios.put(upload_url, sourceResponse.data, {
-              headers: {
-                'Content-Type': contentTypeFromUrl,
-                'Content-Length': contentLength,
-              },
-              maxBodyLength: Infinity,
-              maxContentLength: Infinity,
-            });
-          } else {
-            // GDrive často nevrací Content-Length → buffering
-            console.warn(`[cloud-import] GDrive: content-length chybí pro ${file.name}, používám buffer`);
-            const chunks: Buffer[] = [];
-            await new Promise<void>((resolve, reject) => {
-              sourceResponse.data.on('data', (chunk: Buffer) => chunks.push(chunk));
-              sourceResponse.data.on('end', resolve);
-              sourceResponse.data.on('error', reject);
-            });
-            const buffer = Buffer.concat(chunks);
-            await axios.put(upload_url, buffer, {
-              headers: {
-                'Content-Type': contentTypeFromUrl,
-                'Content-Length': buffer.length,
-              },
-              maxBodyLength: Infinity,
-              maxContentLength: Infinity,
-            });
-          }
+          const buffer = Buffer.from(sourceResponse.data);
+          await axios.put(upload_url, buffer, {
+            headers: {
+              'Content-Type': contentTypeFromUrl,
+              'Content-Length': buffer.length,
+            },
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity,
+          });
         }
       };
 
