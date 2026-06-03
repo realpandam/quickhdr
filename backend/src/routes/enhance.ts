@@ -322,19 +322,42 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
   // ── Background zpracování ─────────────────────────────────────────────────
   (async () => {
     try {
-      // Helper: stáhni soubor z Dropboxu nebo Google Drive
-      const downloadFile = async (file: { url?: string; id?: string; name: string; mimeType?: string }): Promise<Buffer> => {
+      // ── Helper: streamuj soubor přímo z Dropboxu/GDrive na S3 ──────────────
+      // Místo načtení celého souboru do RAM (buffer) používáme stream →
+      // šetří paměť na Railway a download+upload se překrývají → ~3× rychlejší
+      const streamFileToS3 = async (
+        file: { url?: string; id?: string; name: string; mimeType?: string },
+        upload_url: string,
+        correctMime: string
+      ): Promise<void> => {
+        let sourceStream: import('stream').Readable;
+
         if (source === 'dropbox') {
           const url = (file.url as string).replace('dl=0', 'dl=1');
-          const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 5 * 60 * 1000 });
-          return Buffer.from(response.data);
+          const response = await axios.get(url, {
+            responseType: 'stream',
+            timeout: 10 * 60 * 1000,
+          });
+          sourceStream = response.data;
         } else {
           const response = await axios.get(
             `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-            { headers: { Authorization: `Bearer ${access_token}` }, responseType: 'arraybuffer', timeout: 5 * 60 * 1000 }
+            {
+              headers: { Authorization: `Bearer ${access_token}` },
+              responseType: 'stream',
+              timeout: 10 * 60 * 1000,
+            }
           );
-          return Buffer.from(response.data);
+          sourceStream = response.data;
         }
+
+        const urlParams = new URL(upload_url);
+        const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
+        await axios.put(upload_url, sourceStream, {
+          headers: { 'Content-Type': contentTypeFromUrl },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+        });
       };
 
       // ── HDR větev ───────────────────────────────────────────────────────────
@@ -343,7 +366,7 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
         // Fáze 1: Registruj všechny brackety paralelně (10 najednou)
         // Pořadí nezáleží – autoenhance seskupuje podle EXIF metadat
-        const bracketUploads: { file: typeof files[0]; upload_url: string }[] = [];
+        const bracketUploads: { file: typeof files[0]; upload_url: string; correctMime: string }[] = [];
 
         await pLimit(files, 10, async (file) => {
           try {
@@ -354,31 +377,25 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             );
             const upload_url = bracketRes.data.upload_url ?? bracketRes.data.s3PutObjectUrl;
             if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
-            bracketUploads.push({ file, upload_url });
+            const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
+            bracketUploads.push({ file, upload_url, correctMime });
           } catch (err) {
             console.error(`[cloud-import] Chyba při registraci bracketu ${file.name}:`, err);
           }
         });
 
-        // Fáze 2: Stahuj z Dropboxu/GDrive a uploaduj na S3 paralelně (5 najednou)
-        // 5 proto, že každý soubor může být velký RAW (20–50 MB)
-        await pLimit(bracketUploads, 5, async ({ file, upload_url }) => {
+        // Fáze 2: Streamuj z Dropboxu/GDrive přímo na S3 paralelně (15 najednou)
+        // Streaming = žádný celý soubor v RAM, přenosy se překrývají → rychlejší
+        await pLimit(bracketUploads, 15, async ({ file, upload_url, correctMime }) => {
           let success = false;
           for (let attempt = 0; attempt < 3 && !success; attempt++) {
             try {
-              const buffer = await downloadFile(file);
-              const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
-              const urlParams = new URL(upload_url);
-              const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
-              await axios.put(upload_url, buffer, {
-                headers: { 'Content-Type': contentTypeFromUrl },
-                maxBodyLength: Infinity, maxContentLength: Infinity,
-              });
+              await streamFileToS3(file, upload_url, correctMime);
               console.log(`[cloud-import] Bracket uploadnut: ${file.name}`);
               success = true;
             } catch (err) {
               console.error(`[cloud-import] Bracket ${file.name} pokus ${attempt + 1} selhal:`, err);
-              if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+              if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
             }
           }
           if (!success) console.error(`[cloud-import] Bracket ${file.name} selhal po 3 pokusech`);
@@ -461,15 +478,10 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
         console.log(`[cloud-import] Non-HDR: zaregistrováno ${prepared.length}/${validFiles.length} souborů (batch ${upload_batch_id})`);
 
-        // Fáze 2: Stahuj z Dropboxu/GDrive a uploaduj na S3 paralelně (5 najednou)
-        await pLimit(prepared, 5, async (item) => {
+        // Fáze 2: Streamuj z Dropboxu/GDrive přímo na S3 paralelně (15 najednou)
+        await pLimit(prepared, 15, async (item) => {
           try {
-            const buffer = await downloadFile(item.file);
-            const urlParams = new URL(item.upload_url);
-            const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? item.correctMime;
-            await axios.put(item.upload_url, buffer, {
-              headers: { 'Content-Type': contentTypeFromUrl },
-            });
+            await streamFileToS3(item.file, item.upload_url, item.correctMime);
             console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
           } catch (uploadErr) {
             console.error(`[cloud-import] Chyba při uploadu ${item.file.name}:`, uploadErr);
@@ -554,7 +566,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
         .maybeSingle();
 
       if (existingById) {
-        // Tento výsledek už v DB existuje, přeskoč
         console.log(`[webhook] HDR image_id ${image_id} již existuje, přeskakuji`);
         return;
       }
@@ -591,7 +602,7 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
         // Každý řádek = jedna výsledná zpracovaná fotka = jedna platitelná položka
         await supabase.from('orders').insert({
           image_id,
-          filename: null,              // autoenhance nevrací název výsledku
+          filename: null,
           payment_status: 'pending',
           amount_czk: PRICE_CZK,
           user_id: metaRow.user_id,
@@ -612,7 +623,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
 
     if (order_id) {
       // HDR: pošli email až když jsou VŠECHNY výsledky zpracovány
-      // (order_is_processing === false znamená autoenhance skončil)
       if (order_is_processing) return;
 
       try {
