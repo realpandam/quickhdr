@@ -271,8 +271,8 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
             if (res.status === 202) {
                 const data = await res.json();
 
-                // HDR — přesměruj na order stránku (chování beze změny)
-                if (hdrMode && data.order_id) {
+                // HDR nepřihlášený — přesměruj na order stránku s pollingem
+                if (!user && hdrMode && data.order_id) {
                     window.location.href = `/order/hdr_pending_${data.order_id}`;
                     return;
                 }
@@ -283,7 +283,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                     return;
                 }
 
-                // Přihlášený uživatel — zůstane na stránce, fotky se uloží do dashboardu
+                // Přihlášený uživatel (HDR i non-HDR) — zůstane na stránce, dostane email
                 setCloudState('accepted');
             } else {
                 const data = await res.json().catch(() => ({}));
