@@ -601,7 +601,7 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           }
         });
 
-        const uploadConcurrency = source === 'dropbox_oauth' ? 10 : 5;
+        const uploadConcurrency = source === 'dropbox_oauth' ? 3 : 5;
         await pLimit(bracketUploads, uploadConcurrency, async ({ file, upload_url, correctMime }) => {
           let success = false;
           for (let attempt = 0; attempt < 3 && !success; attempt++) {
@@ -679,7 +679,7 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
         console.log(`[cloud-import] Non-HDR: zaregistrováno ${prepared.length}/${validFiles.length} souborů (batch ${upload_batch_id})`);
 
-        const uploadConcurrency = source === 'dropbox_oauth' ? 10 : 5;
+        const uploadConcurrency = source === 'dropbox_oauth' ? 3 : 5;
         await pLimit(prepared, uploadConcurrency, async (item) => {
           let success = false;
           for (let attempt = 0; attempt < 3 && !success; attempt++) {
