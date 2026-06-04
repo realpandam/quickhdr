@@ -513,10 +513,11 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
         if (source === 'dropbox_oauth') {
-          // Použij id místo path pokud je dostupné — vyhneme se problémům s diakritikou v cestě
-          const dropboxArg = file.id
-            ? JSON.stringify({ path: `id:${file.id}` })
-            : JSON.stringify({ path: file.path_lower });
+          // path_lower jako primární (funguje se sdílenými složkami),
+          // id: jako fallback pokud path_lower chybí
+          const dropboxArg = file.path_lower
+            ? JSON.stringify({ path: file.path_lower })
+            : JSON.stringify({ path: `id:${file.id}` });
 
           console.log(`[dropbox-download] ${file.name} → arg: ${dropboxArg}`);
 
@@ -536,7 +537,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               }
             );
           } catch (dropboxErr: any) {
-            // ── Diagnostický log: přesná odpověď od Dropboxu ──────────────
             const status = dropboxErr?.response?.status;
             const body = parseDropboxError(dropboxErr);
             console.error(`[dropbox-download] ${file.name} CHYBA HTTP ${status}: ${body}`);
