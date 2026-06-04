@@ -1,18 +1,66 @@
 <!DOCTYPE html>
-<html>
-<head><title>Dropbox</title></head>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <title>Dropbox přihlášení…</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #09090F;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #fff;
+    }
+    .box {
+      text-align: center;
+      padding: 2rem;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #22222E;
+      border-top-color: #7B5CF0;
+      border-radius: 50%;
+      margin: 0 auto 1rem;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    p { font-size: 14px; color: #8888A0; margin: 0; }
+  </style>
+</head>
 <body>
-<p>Přihlašování k Dropboxu...</p>
-<script>
-  const hash = window.location.hash.substring(1);
-  const params = new URLSearchParams(hash);
-  const token = params.get('access_token');
+  <div class="box">
+    <div class="spinner"></div>
+    <p>Přihlašuji k Dropboxu…</p>
+  </div>
+  <script>
+    // Přečti parametry z URL (Dropbox přesměruje sem s ?code=...&state=...)
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    const error = params.get('error');
 
-  if (token) {
-    sessionStorage.setItem('dropbox_token', token);
-    // Přesměruj zpět na hlavní stránku
-    window.location.href = '/';
-  }
-</script>
+    // Pošli výsledek zpět do hlavního okna přes postMessage
+    if (window.opener) {
+      window.opener.postMessage(
+        {
+          type: 'dropbox_oauth_callback',
+          code,
+          state,
+          error,
+        },
+        window.location.origin
+      );
+    }
+
+    // Popup se zavře sám (hlavní okno zavolá popup.close())
+    // Pokud opener neexistuje (přímý přístup), přesměruj na homepage
+    setTimeout(() => {
+      if (!window.opener) window.location.href = '/';
+    }, 2000);
+  </script>
 </body>
 </html>
