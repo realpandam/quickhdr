@@ -174,23 +174,10 @@ router.post('/dropbox-list', async (req: Request, res: Response) => {
 });
 
 // ── Batch status ──────────────────────────────────────────────────────────────
-//
-// Polling endpoint pro /processing/[batchId] stránku.
-// Vrací stav všech image_id v batchi a jejich Autoenhance status.
-//
-// Fáze 1 — "uploading": záznamy v DB existují ale soubory ještě nejsou
-//   na S3 (image_id existuje, ale Autoenhance je nezná nebo jsou "pending").
-// Fáze 2 — "processing": soubory jsou na S3, Autoenhance je zpracovává.
-// Fáze 3 — "done": všechny soubory jsou processed (nebo failed/error).
-//
-// total_files: počet souborů z původního importu (nevíme ho zde přesně,
-//   ale DB záznamy se tvoří v Fázi 1 pLimit, takže počet roste postupně)
-//
 router.get('/batch-status/:batchId', async (req: Request, res: Response) => {
   const { batchId } = req.params;
 
   try {
-    // Načti všechny orders pro tento batch
     const { data: orders, error } = await supabase
       .from('orders')
       .select('image_id, filename')
@@ -199,9 +186,8 @@ router.get('/batch-status/:batchId', async (req: Request, res: Response) => {
     if (error) throw error;
 
     if (!orders || orders.length === 0) {
-      // Batch ještě neexistuje v DB — soubory se teprve registrují
       res.json({
-        phase: 'uploading',   // stahujeme z Dropboxu / registrujeme u Autoenhance
+        phase: 'uploading',
         total: 0,
         uploaded: 0,
         processed: 0,
@@ -211,7 +197,6 @@ router.get('/batch-status/:batchId', async (req: Request, res: Response) => {
       return;
     }
 
-    // Zkontroluj stav každé fotky u Autoenhance paralelně
     const statuses = await Promise.allSettled(
       orders.map(async (o) => {
         try {
@@ -220,7 +205,6 @@ router.get('/batch-status/:batchId', async (req: Request, res: Response) => {
           });
           return { image_id: o.image_id, status: r.data.status as string };
         } catch {
-          // Autoenhance nezná image_id = soubor ještě není na S3
           return { image_id: o.image_id, status: 'uploading' };
         }
       })
@@ -253,7 +237,6 @@ router.get('/batch-status/:batchId', async (req: Request, res: Response) => {
       uploaded: total - uploading.length,
       processed: processed.length,
       failed: failed.length,
-      // image_ids hotových fotek — frontend použije pro přesměrování na order stránku
       image_ids: processed.map(r => r.image_id),
     });
   } catch (err) {
@@ -459,6 +442,20 @@ router.get('/hdr/order/:orderId/status', async (req: Request, res: Response) => 
   }
 });
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function parseDropboxError(err: any): string {
+  try {
+    const data = err?.response?.data;
+    if (!data) return 'no response data';
+    if (Buffer.isBuffer(data)) return data.toString('utf8').slice(0, 300);
+    if (typeof data === 'string') return data.slice(0, 300);
+    return JSON.stringify(data).slice(0, 300);
+  } catch {
+    return String(err?.message ?? 'unknown');
+  }
+}
+
 // ── Cloud Import ──────────────────────────────────────────────────────────────
 router.post('/cloud-import', async (req: Request, res: Response) => {
   const {
@@ -496,11 +493,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
     }
   }
 
-  // Non-HDR: vygeneruj upload_batch_id teď, aby ho frontend dostal v 202
-  // a mohl ihned přesměrovat na /processing/[batchId]
   const upload_batch_id = hdr_mode ? null : randomUUID();
 
-  // FIX: 202 response teď vrací upload_batch_id pro nepřihlášené uživatele
   res.status(202).json({
     ok: true,
     order_id: hdr_order_id,
@@ -519,24 +513,36 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
         if (source === 'dropbox_oauth') {
-          const dropboxArg = JSON.stringify(
-            file.path_lower
-              ? { path: file.path_lower }
-              : { path: `id:${file.id}` }
-          );
-          const sourceResponse = await axios.post(
-            'https://content.dropboxapi.com/2/files/download',
-            null,
-            {
-              headers: {
-                Authorization: `Bearer ${access_token}`,
-                'Dropbox-API-Arg': dropboxArg,
-                'Content-Type': '',
-              },
-              responseType: 'arraybuffer',
-              timeout: 10 * 60 * 1000,
-            }
-          );
+          // Použij id místo path pokud je dostupné — vyhneme se problémům s diakritikou v cestě
+          const dropboxArg = file.id
+            ? JSON.stringify({ path: `id:${file.id}` })
+            : JSON.stringify({ path: file.path_lower });
+
+          console.log(`[dropbox-download] ${file.name} → arg: ${dropboxArg}`);
+
+          let sourceResponse: any;
+          try {
+            sourceResponse = await axios.post(
+              'https://content.dropboxapi.com/2/files/download',
+              null,
+              {
+                headers: {
+                  Authorization: `Bearer ${access_token}`,
+                  'Dropbox-API-Arg': dropboxArg,
+                  'Content-Type': '',
+                },
+                responseType: 'arraybuffer',
+                timeout: 10 * 60 * 1000,
+              }
+            );
+          } catch (dropboxErr: any) {
+            // ── Diagnostický log: přesná odpověď od Dropboxu ──────────────
+            const status = dropboxErr?.response?.status;
+            const body = parseDropboxError(dropboxErr);
+            console.error(`[dropbox-download] ${file.name} CHYBA HTTP ${status}: ${body}`);
+            throw dropboxErr;
+          }
+
           const buffer = Buffer.from(sourceResponse.data);
           await axios.put(upload_url, buffer, {
             headers: { 'Content-Type': contentTypeFromUrl, 'Content-Length': buffer.length },
@@ -590,8 +596,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             if (!upload_url) throw new Error('Nepodařilo se získat upload URL');
             const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
             bracketUploads.push({ file, upload_url, correctMime });
-          } catch (err) {
-            console.error(`[cloud-import] Chyba při registraci bracketu ${file.name}:`, err);
+          } catch (err: any) {
+            console.error(`[cloud-import] Chyba při registraci bracketu ${file.name}: ${err?.response?.status} ${err?.message}`);
           }
         });
 
@@ -603,8 +609,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               await streamFileToS3(file, upload_url, correctMime);
               console.log(`[cloud-import] Bracket uploadnut: ${file.name}`);
               success = true;
-            } catch (err) {
-              console.error(`[cloud-import] Bracket ${file.name} pokus ${attempt + 1} selhal:`, err);
+            } catch (err: any) {
+              console.error(`[cloud-import] Bracket ${file.name} pokus ${attempt + 1} selhal: ${err?.response?.status} ${err?.message}`);
               if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
             }
           }
@@ -666,8 +672,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             });
 
             prepared.push({ image_id, upload_url, correctMime, file });
-          } catch (createErr) {
-            console.error(`[cloud-import] Chyba při registraci image pro ${file.name}:`, createErr);
+          } catch (createErr: any) {
+            console.error(`[cloud-import] Chyba při registraci image pro ${file.name}: ${createErr?.response?.status} ${createErr?.message}`);
           }
         });
 
@@ -681,9 +687,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               await streamFileToS3(item.file, item.upload_url, item.correctMime);
               console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
               success = true;
-            } catch (uploadErr) {
-              const axErr = uploadErr as any;
-              console.error(`[cloud-import] ${item.file.name} pokus ${attempt + 1} selhal: ${axErr?.response?.status} ${axErr?.message}`);
+            } catch (uploadErr: any) {
+              console.error(`[cloud-import] ${item.file.name} pokus ${attempt + 1} selhal: ${uploadErr?.response?.status} ${uploadErr?.message}`);
               if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
             }
           }
@@ -694,8 +699,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
         console.log(`[cloud-import] Non-HDR batch ${upload_batch_id} dokončen, ${prepared.length} souborů`);
       }
-    } catch (err) {
-      console.error('[cloud-import] Fatální chyba:', err);
+    } catch (err: any) {
+      console.error(`[cloud-import] Fatální chyba: ${err?.message}`);
     }
   })();
 });
@@ -798,7 +803,7 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
             html: notifyBatchEmailHtml(processedImages.length, GOPAY_RETURN_URL),
           });
         }
-      } catch (emailErr) { console.error('[webhook] Chyba při odesílání HDR emailu:', emailErr); }
+      } catch (emailErr: any) { console.error(`[webhook] Chyba při odesílání HDR emailu: ${emailErr?.message}`); }
       return;
     }
 
@@ -824,7 +829,7 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
               html: notifyBatchEmailHtml(batchOrders.length, GOPAY_RETURN_URL),
             });
           }
-        } catch (emailErr) { console.error('[webhook] Chyba při odesílání batch emailu:', emailErr); }
+        } catch (emailErr: any) { console.error(`[webhook] Chyba při odesílání batch emailu: ${emailErr?.message}`); }
         return;
       }
     }
@@ -839,8 +844,8 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
           html: notifyEmailHtml(order.filename, image_id, GOPAY_RETURN_URL),
         });
       }
-    } catch (emailErr) { console.error('[webhook] Chyba při odesílání emailu:', emailErr); }
-  } catch (err) { console.error('[webhook] Fatální chyba:', err); }
+    } catch (emailErr: any) { console.error(`[webhook] Chyba při odesílání emailu: ${emailErr?.message}`); }
+  } catch (err: any) { console.error(`[webhook] Fatální chyba: ${err?.message}`); }
 });
 
 // ── Notify (fallback) ─────────────────────────────────────────────────────────
