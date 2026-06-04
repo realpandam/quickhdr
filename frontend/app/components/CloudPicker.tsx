@@ -1,7 +1,8 @@
 'use client';
 
 import Script from 'next/script';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { API_URL } from '../lib/config';
 import { supabase } from '../lib/supabase';
 import type { Settings } from './SettingsPanel';
@@ -344,6 +345,10 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
     const allFolderSelected = supportedFilesInFolder.length > 0 && supportedFilesInFolder.every(e => dropboxSelected.has(e.id));
     const currentFolderName = dropboxPath ? dropboxPath.split('/').filter(Boolean).pop() ?? 'Dropbox' : 'Dropbox';
 
+    // Portal mount guard — createPortal nefunguje na serveru
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => { setMounted(true); }, []);
+
     return (
         <>
             <Script src="https://apis.google.com/js/api.js" strategy="afterInteractive" />
@@ -389,10 +394,10 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 </button>
             </div>
 
-            {/* Dropbox file browser modal */}
-            {dropboxAuthState === 'browsing' && (
-                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
+            {/* Dropbox file browser modal — renderujeme do body přes portal aby fixed fungoval správně */}
+            {mounted && dropboxAuthState === 'browsing' && createPortal(
+                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: '#000000e8', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
+                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: 'min(600px, calc(100vh - 3rem))', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(0,0,0,0.8)', overflow: 'hidden' }}>
                         {/* Header */}
                         <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                             {dropboxPathHistory.length > 0 && (
@@ -473,19 +478,21 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                         </div>
                     </div>
                     <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-                </div>
+                </div>,
+                document.body
             )}
 
-            {/* Odesílání na backend */}
-            {cloudState === 'submitting' && (
-                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {/* Odesílání na backend — taky přes portal */}
+            {mounted && cloudState === 'submitting' && createPortal(
+                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: '#000000e8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: '2rem 2.5rem', width: 340, textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
                         <div style={{ width: 48, height: 48, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 1.5rem', animation: 'spin 1s linear infinite' }} />
                         <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Předávám soubory serveru…</p>
                         <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{fileCount} souborů z {cloudSource}</p>
                     </div>
                     <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* Přijato (pouze pro přihlášené) */}
