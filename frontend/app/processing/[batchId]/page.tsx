@@ -15,9 +15,7 @@ interface BatchStatus {
     image_ids: string[];
 }
 
-// Timeout: 20 minut — dost na stažení + zpracování velkého batche
 const TIMEOUT_MS = 20 * 60 * 1000;
-// Polling interval: každé 4 sekundy
 const POLL_INTERVAL_MS = 4000;
 
 function ProcessingPageInner() {
@@ -33,12 +31,10 @@ function ProcessingPageInner() {
     const [status, setStatus] = useState<BatchStatus | null>(null);
     const [timedOut, setTimedOut] = useState(false);
 
-    // Animovaný progress — plynule roste i mezi pollingy
     const [displayProgress, setDisplayProgress] = useState(0);
     const targetProgressRef = useRef<number>(0);
     const animFrameRef = useRef<number>(0);
 
-    // Spusť animaci progress baru
     useEffect(() => {
         const animate = () => {
             setDisplayProgress(prev => {
@@ -52,7 +48,6 @@ function ProcessingPageInner() {
         return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
     }, []);
 
-    // Polling
     useEffect(() => {
         if (!batchId) return;
 
@@ -66,7 +61,6 @@ function ProcessingPageInner() {
 
         const poll = async () => {
             if (stopped) return;
-
             try {
                 const res = await fetch(`${API_URL}/api/enhance/batch-status/${batchId}`);
                 if (!res.ok) throw new Error('Chyba serveru');
@@ -76,21 +70,16 @@ function ProcessingPageInner() {
                 setStatus(data);
                 setPhase(data.phase);
 
-                // Spočítej target progress
                 const total = data.total || totalFromUrl || 1;
                 if (data.phase === 'uploading') {
-                    // Fáze 1: 0–30 % — čekáme na registraci u Autoenhance
                     targetProgressRef.current = Math.min(28, (data.uploaded / total) * 30);
                 } else if (data.phase === 'processing') {
-                    // Fáze 2: 30–95 % — AI zpracovává
-                    const aiProgress = data.processed / total;
-                    targetProgressRef.current = 30 + aiProgress * 65;
+                    targetProgressRef.current = 30 + (data.processed / total) * 65;
                 } else if (data.phase === 'done') {
                     targetProgressRef.current = 100;
                 }
 
                 if (data.phase === 'done' && data.image_ids.length > 0) {
-                    // Krátká pauza aby progress bar dojel na 100 %
                     clearTimeout(timeout);
                     setTimeout(() => {
                         const primary = data.image_ids[0];
@@ -109,7 +98,6 @@ function ProcessingPageInner() {
             }
         };
 
-        // První poll po 1 sekundě (dáme backendu chvíli na zápis do DB)
         const firstPoll = setTimeout(poll, 1000);
 
         return () => {
@@ -156,17 +144,12 @@ function ProcessingPageInner() {
                         </h2>
                         <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '2rem' }}>
                             {timedOut
-                                ? 'Fotografie se stále zpracovávají na pozadí. Zaregistrujte se a pošleme vám email po dokončení.'
-                                : 'Omlouváme se, nastala chyba při zpracování. Zkuste to prosím znovu nebo nás kontaktujte.'}
+                                ? 'Fotografie se stále zpracovávají na pozadí. Zkuste to znovu nebo nás kontaktujte.'
+                                : 'Omlouváme se, nastala chyba při zpracování. Zkuste to prosím znovu nebo nás kontaktujte na info@fasthdr.cz.'}
                         </p>
-                        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-                            <a href="/register" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14 }}>
-                                Vytvořit účet a dostat email
-                            </a>
-                            <a href="/" className="btn" style={{ padding: '10px 24px', fontSize: 14 }}>
-                                Zkusit znovu
-                            </a>
-                        </div>
+                        <a href="/" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14 }}>
+                            Zkusit znovu
+                        </a>
                     </>
                 ) : (
                     <>
@@ -179,7 +162,6 @@ function ProcessingPageInner() {
                                 borderRadius: '50%',
                                 animation: 'spin 1s linear infinite',
                             }} />
-                            {/* Procenta uprostřed */}
                             {displayProgress > 5 && (
                                 <div style={{
                                     position: 'absolute', inset: 0,
@@ -208,49 +190,20 @@ function ProcessingPageInner() {
                         </h2>
 
                         {/* Hlavní text */}
-                        <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.7, marginBottom: '2rem' }}>
+                        <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.7, marginBottom: '1.25rem' }}>
                             {total > 0
                                 ? `Zpracováváme ${total} ${total === 1 ? 'fotografii' : total < 5 ? 'fotografie' : 'fotografií'} z ${sourceName}.`
                                 : `Zpracováváme vaše fotografie z ${sourceName}.`
                             }
                             {' '}
                             <strong style={{ color: 'var(--text-secondary)' }}>Nezavírejte tento prohlížeč.</strong>
+                            {' '}Po dokončení se výsledky zobrazí automaticky.
                         </p>
 
-                        {/* Divider */}
-                        <div style={{ height: 1, background: 'var(--border)', margin: '0 0 1.5rem' }} />
-
-                        {/* CTA pro registraci */}
-                        <div style={{
-                            padding: '1.25rem',
-                            background: 'rgba(123,92,240,0.06)',
-                            border: '1px solid rgba(123,92,240,0.2)',
-                            borderRadius: 12,
-                            textAlign: 'left',
-                        }}>
-                            <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 6px' }}>
-                                💡 Chcete dostat email po dokončení?
-                            </p>
-                            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 1rem', lineHeight: 1.5 }}>
-                                Zaregistrujte se zdarma — po zpracování vám pošleme email s odkazem na výsledky a budete je mít uložené v dashboardu.
-                            </p>
-                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                                <a
-                                    href="/register"
-                                    className="btn btn-primary"
-                                    style={{ fontSize: 13, padding: '8px 18px' }}
-                                >
-                                    Vytvořit účet zdarma
-                                </a>
-                                <a
-                                    href="/login"
-                                    className="btn"
-                                    style={{ fontSize: 13, padding: '8px 18px' }}
-                                >
-                                    Přihlásit se
-                                </a>
-                            </div>
-                        </div>
+                        {/* Info o emailu — bez odkazů */}
+                        <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>
+                            Zpracování může trvat až několik minut. Přihlášeným uživatelům pošleme výsledky přímo na email — nemusí u obrazovky čekat.
+                        </p>
                     </>
                 )}
             </div>
