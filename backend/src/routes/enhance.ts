@@ -531,6 +531,7 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               headers: {
                 Authorization: `Bearer ${access_token}`,
                 'Dropbox-API-Arg': dropboxArg,
+                'Content-Type': '',
               },
               responseType: 'arraybuffer',
               timeout: 10 * 60 * 1000,
@@ -681,7 +682,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
               success = true;
             } catch (uploadErr) {
-              console.error(`[cloud-import] ${item.file.name} pokus ${attempt + 1} selhal:`, uploadErr);
+              const axErr = uploadErr as any;
+              console.error(`[cloud-import] ${item.file.name} pokus ${attempt + 1} selhal: ${axErr?.response?.status} ${axErr?.message}`);
               if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
             }
           }
