@@ -149,15 +149,12 @@ export default function DashboardPage() {
   const [editingValue, setEditingValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // Potvrzovací dialog pro mazání
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
     message: string;
     onConfirm: () => void;
   } | null>(null);
 
-  // Sledujeme které image_id se úspěšně načetly (= Autoenhance zpracoval)
-  // Skupina je "processing" dokud se aspoň jedna fotka nenačte
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
   const markLoaded = useCallback((imageId: string) => {
     setLoadedImages(prev => {
@@ -166,10 +163,6 @@ export default function DashboardPage() {
     });
   }, []);
 
-  // Skupina se zpracovává pokud obsahuje hdr_pending_ order.
-  // Non-HDR nelze spolehlivě detekovat bez lazy load (thumbnaily se načítají
-  // až po otevření skupiny) — locked skupina by nikdy nešla otevřít.
-  // Proto lockujeme POUZE HDR pending skupiny.
   const isGroupProcessing = useCallback((group: BatchGroup): boolean => {
     if (group.isExpired) return false;
     return group.orders.some(o => isHdrPending(o.image_id));
@@ -582,8 +575,6 @@ export default function DashboardPage() {
                 const allGroupSelected = selectableOrders.length > 0 && selectableOrders.every(o => selectedOrders.has(o.id));
                 const someGroupSelected = selectableOrders.some(o => selectedOrders.has(o.id));
                 const isEditing = editingBatch === group.batch_id;
-
-                // ── Klíčová logika: skupina se zpracovává ──────────────────
                 const groupProcessing = isGroupProcessing(group);
 
                 return (
@@ -593,9 +584,8 @@ export default function DashboardPage() {
                     background: 'var(--bg-card)', overflow: 'hidden',
                     animation: `slideUp 0.4s cubic-bezier(0.34,1.56,0.64,1) ${gIdx * 0.05}s both`,
                     transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
-                    // Vizuální zašednutí celé karty při zpracování
-                    opacity: groupProcessing ? 0.6 : 1,
-                    pointerEvents: groupProcessing ? 'none' : 'auto',
+                    // Vizuální zašednutí při zpracování, ale interakce povoleny
+                    opacity: groupProcessing ? 0.75 : 1,
                   }}>
 
                     {/* Batch header */}
@@ -701,7 +691,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
 
-                      {/* Badges — skryj delete při zpracování */}
+                      {/* Badges + delete — delete vždy viditelný */}
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
                         {groupProcessing ? (
                           <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(123,92,240,0.12)', color: 'var(--accent)' }}>
@@ -722,36 +712,34 @@ export default function DashboardPage() {
                             {group.totalCount} fotek
                           </span>
                         )}
-                        {/* 🗑 batch delete — pouze pokud NENÍ zpracovávání */}
-                        {!groupProcessing && (
-                          <button
-                            onClick={e => { e.stopPropagation(); handleDeleteBatch(group.orders); }}
-                            title="Smazat skupinu"
-                            style={{
-                              width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              background: 'transparent', border: '1px solid transparent', borderRadius: 6,
-                              color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, transition: 'all 0.15s ease',
-                            }}
-                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.1)'; (e.currentTarget as HTMLButtonElement).style.color = '#ef4444'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.3)'; }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent'; }}
-                          >
-                            🗑
-                          </button>
-                        )}
+                        {/* 🗑 delete — vždy viditelný, s confirmation dialogem */}
+                        <button
+                          onClick={e => { e.stopPropagation(); handleDeleteBatch(group.orders); }}
+                          title="Smazat skupinu"
+                          style={{
+                            width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: 'transparent', border: '1px solid transparent', borderRadius: 6,
+                            color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.1)'; (e.currentTarget as HTMLButtonElement).style.color = '#ef4444'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.3)'; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent'; }}
+                        >
+                          🗑
+                        </button>
                         <span style={{ fontSize: 15, color: 'var(--text-muted)', transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block', marginLeft: 2 }}>
                           ▾
                         </span>
                       </div>
                     </div>
 
-                    {/* Expanded content — celý blok disabled při zpracování */}
+                    {/* Expanded content */}
                     <div style={{
                       display: 'grid',
                       gridTemplateRows: isOpen ? '1fr' : '0fr',
                       transition: 'grid-template-rows 0.35s cubic-bezier(0.4,0,0.2,1)',
                     }}>
                       <div style={{ overflow: 'hidden' }}>
-                        {/* Overlay při zpracování — zakryje celý obsah */}
+                        {/* Overlay při zpracování */}
                         {groupProcessing && isOpen && (
                           <div style={{
                             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -779,6 +767,7 @@ export default function DashboardPage() {
                                 const isPaid = order.payment_status === 'paid';
                                 const countdown = getCountdown(order.expires_at);
                                 const isSelected = selectedOrders.has(order.id);
+                                const photoReady = loadedImages.has(order.image_id);
 
                                 return (
                                   <div key={order.id} style={{
@@ -788,7 +777,7 @@ export default function DashboardPage() {
                                     position: 'relative' as const,
                                   }}>
                                     {/* Checkbox — jen pro hotové nezaplacené */}
-                                    {!expired && isPaid === false && loadedImages.has(order.image_id) && (
+                                    {!expired && isPaid === false && photoReady && (
                                       <div
                                         onClick={e => toggleOrder(order.id, e)}
                                         style={{
@@ -814,7 +803,7 @@ export default function DashboardPage() {
                                         onClick={() => openLightbox(group.orders, oIdx)}
                                         onLoaded={markLoaded}
                                       />
-                                      {isPaid && !expired && loadedImages.has(order.image_id) && (
+                                      {isPaid && !expired && photoReady && (
                                         <div style={{ position: 'absolute' as const, top: 5, right: 5, background: 'rgba(74,222,128,0.9)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, color: '#052e16', zIndex: 1 }}>✓</div>
                                       )}
                                     </div>
@@ -860,9 +849,22 @@ export default function DashboardPage() {
                                             </a>
                                           )}
                                         </div>
-                                      ) : !expired && loadedImages.has(order.image_id) ? (
-                                        <button onClick={() => handleBuy(order)} style={{ flex: 1, padding: '6px 8px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }}>
-                                          Koupit
+                                      ) : !expired && photoReady ? (
+                                        // Koupit — JEDINÉ co je disabled při zpracování skupiny
+                                        <button
+                                          onClick={() => handleBuy(order)}
+                                          disabled={groupProcessing}
+                                          style={{
+                                            flex: 1, padding: '6px 8px', background: groupProcessing ? 'var(--bg-secondary)' : 'var(--accent)',
+                                            color: groupProcessing ? 'var(--text-muted)' : '#000',
+                                            border: groupProcessing ? '1px solid var(--border)' : 'none',
+                                            borderRadius: 5, cursor: groupProcessing ? 'not-allowed' : 'pointer',
+                                            fontSize: 11, fontWeight: 700, fontFamily: 'inherit',
+                                            opacity: groupProcessing ? 0.5 : 1,
+                                            transition: 'all 0.15s ease',
+                                          }}
+                                        >
+                                          {groupProcessing ? 'Čeká se…' : 'Koupit'}
                                         </button>
                                       ) : expired ? (
                                         <button onClick={() => handleDelete(order.id)} style={{ flex: 1, padding: '6px 8px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}>
@@ -879,7 +881,7 @@ export default function DashboardPage() {
                               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                                 {group.paidCount} z {group.totalCount} zaplaceno · {group.orders.reduce((s, o) => s + (o.amount_czk || 0), 0)} Kč celkem
                               </span>
-                              {batchExpired && !groupProcessing && (
+                              {batchExpired && (
                                 <button onClick={() => handleDeleteBatch(group.orders)} style={{ padding: '6px 14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
                                   🗑 Smazat skupinu
                                 </button>
