@@ -221,6 +221,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
             if (sortField === 'name') cmp = a.name.localeCompare(b.name);
             else if (sortField === 'size') cmp = (a.size ?? 0) - (b.size ?? 0);
             else if (sortField === 'modified') cmp = (a.modified ?? '').localeCompare(b.modified ?? '');
+
             return sortDir === 'asc' ? cmp : -cmp;
         });
 
@@ -228,15 +229,9 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
     }, [dropboxEntries, searchQuery, sortField, sortDir, showOnlyImages]);
 
     const handleSort = useCallback((field: SortField) => {
-        setSortField(prev => {
-            if (prev === field) {
-                setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-                return field;
-            }
-            setSortDir('asc');
-            return field;
-        });
-    }, []);
+        if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        else { setSortField(field); setSortDir('asc'); }
+    }, [sortField]);
 
     const navigateInto = useCallback((entry: DropboxEntry) => {
         if (entry.tag !== 'folder') return;
@@ -404,6 +399,17 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
     const [mounted, setMounted] = useState(false);
     useEffect(() => { setMounted(true); }, []);
 
+    // Zamknout scroll pozadí když je dialog otevřený
+    useEffect(() => {
+        const isOpen = dropboxAuthState === 'browsing' || cloudState === 'submitting';
+        if (isOpen) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = '';
+        }
+        return () => { document.body.style.overflow = ''; };
+    }, [dropboxAuthState, cloudState]);
+
     const SortIcon = ({ field }: { field: SortField }) => {
         if (sortField !== field) return <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>↕</span>;
         return <span style={{ color: 'var(--accent)', fontSize: 10 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>;
@@ -456,7 +462,10 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
 
             {/* Dropbox file browser modal */}
             {mounted && dropboxAuthState === 'browsing' && createPortal(
-                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: '#000000e8', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
+                <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 2000, background: '#000000e8', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}
+                    onWheel={e => e.stopPropagation()}
+                >
                     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, width: '100%', maxWidth: 600, maxHeight: 'min(680px, calc(100vh - 3rem))', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(0,0,0,0.8)', overflow: 'hidden' }}>
 
                         {/* Header */}
@@ -620,7 +629,10 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
 
             {/* Odesílání na backend */}
             {mounted && cloudState === 'submitting' && createPortal(
-                <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: '#000000e8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 2000, background: '#000000e8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onWheel={e => e.stopPropagation()}
+                >
                     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: '2rem 2.5rem', width: 340, textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
                         <div style={{ width: 48, height: 48, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 1.5rem', animation: 'spin 1s linear infinite' }} />
                         <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Předávám soubory serveru…</p>
