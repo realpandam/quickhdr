@@ -100,10 +100,13 @@ async function getDropboxNamespaceId(access_token: string): Promise<string | nul
       null,
       { headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' } }
     );
-    const namespaceId = res.data?.root_info?.root_namespace_id ?? null;
+    const rootInfo = res.data?.root_info;
+    const namespaceId = rootInfo?.root_namespace_id ?? null;
+    // Logujeme celý root_info pro diagnostiku
+    console.error(`[dropbox-namespace] root_info: ${JSON.stringify(rootInfo)} → namespace: ${namespaceId}`);
     return namespaceId ? String(namespaceId) : null;
   } catch (err: any) {
-    console.error(`[dropbox-namespace] Nepodařilo se zjistit namespace: ${err?.message}`);
+    console.error(`[dropbox-namespace] Chyba při zjišťování namespace: ${err?.message} status:${err?.response?.status} body:${JSON.stringify(err?.response?.data ?? '')}`);
     return null;
   }
 }
@@ -486,7 +489,9 @@ async function dropboxDownload(
       'Dropbox-API-Arg': dropboxArg,
       'Content-Type': '',
     };
-    if (nsId) {
+    // Namespace header posíláme jen pokud máme ID a nepoužíváme id: referenci
+    // S id: referencí (id:xyz) namespace header není potřeba - Dropbox soubor najde přímo
+    if (nsId && !dropboxArg.includes('"path":"id:')) {
       headers['Dropbox-API-Path-Root'] = JSON.stringify({ '.tag': 'namespace_id', 'namespace_id': nsId });
     }
     return headers;
@@ -623,9 +628,11 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
         if (source === 'dropbox_oauth') {
-          const dropboxArg = file.path_lower
-            ? JSON.stringify({ path: file.path_lower })
-            : JSON.stringify({ path: `id:${file.id}` });
+          // Vždy používáme file ID - funguje bez ohledu na namespace/mounting
+          // path_lower je relativní k namespace kde je soubor mountnutý a nemusí fungovat
+          const dropboxArg = file.id
+            ? JSON.stringify({ path: `id:${file.id}` })
+            : JSON.stringify({ path: file.path_lower });
 
           // Zjistíme user root namespace proaktivně jednou pro celý batch —
           // musí být před výpočtem effectiveNamespace, jinak první soubor
