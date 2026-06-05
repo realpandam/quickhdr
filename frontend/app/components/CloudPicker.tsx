@@ -74,6 +74,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
 
     const [dropboxAuthState, setDropboxAuthState] = useState<DropboxAuthState>('idle');
     const [dropboxToken, setDropboxToken] = useState<string>('');
+    const [dropboxRefreshToken, setDropboxRefreshToken] = useState<string>('');
     const [dropboxEntries, setDropboxEntries] = useState<DropboxEntry[]>([]);
     const [dropboxPath, setDropboxPath] = useState<string>('');
     const [dropboxPathHistory, setDropboxPathHistory] = useState<string[]>([]);
@@ -130,9 +131,10 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                     });
 
                     if (!tokenRes.ok) throw new Error('Nepodařilo se získat Dropbox token');
-                    const { access_token } = await tokenRes.json();
+                    const { access_token, refresh_token } = await tokenRes.json();
 
                     setDropboxToken(access_token);
+                    setDropboxRefreshToken(refresh_token ?? '');
                     setDropboxAuthState('browsing');
                     await loadDropboxFolder('', access_token);
                 } catch (err) {
@@ -246,7 +248,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
             sharing_info: e.sharing_info ?? null,
         }));
 
-        await sendToBackend('dropbox_oauth', files, dropboxToken);
+        await sendToBackend('dropbox_oauth', files, dropboxToken, dropboxRefreshToken);
     }, [dropboxEntries, dropboxSelected, dropboxToken]);
 
     // ── Odešli metadata na backend ────────────────────────────────────────────
@@ -254,6 +256,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
         source: 'dropbox_oauth' | 'google_drive',
         files: { url?: string; id?: string; path_lower?: string; name: string; mimeType?: string; bytes?: number; size?: number; sharing_info?: { parent_shared_folder_id?: string } | null }[],
         token?: string,
+        refreshToken?: string,
     ) => {
         setCloudState('submitting');
         setCloudSource(source === 'dropbox_oauth' ? 'Dropbox' : 'Google Drive');
@@ -268,6 +271,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 user_id: user?.id ?? null, session_id: session_id ?? null,
             };
             if (token) body.access_token = token;
+            if (refreshToken) body.refresh_token = refreshToken;
 
             const res = await fetch(`${API_URL}/api/enhance/cloud-import`, {
                 method: 'POST',

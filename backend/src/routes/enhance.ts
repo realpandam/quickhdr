@@ -108,6 +108,27 @@ async function getDropboxNamespaceId(access_token: string): Promise<string | nul
   }
 }
 
+// ── Dropbox: refresh access token ────────────────────────────────────────────
+async function refreshDropboxToken(refresh_token: string): Promise<string | null> {
+  try {
+    const credentials = Buffer.from(`${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}`).toString('base64');
+    const res = await axios.post(
+      'https://api.dropbox.com/oauth2/token',
+      new URLSearchParams({ grant_type: 'refresh_token', refresh_token }).toString(),
+      {
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+    return res.data.access_token ?? null;
+  } catch (err: any) {
+    console.error(`[dropbox-refresh] Nepodařilo se refreshnout token: ${err?.message}`);
+    return null;
+  }
+}
+
 // ── Dropbox OAuth: vrať authorization URL ────────────────────────────────────
 router.get('/dropbox-auth-url', (req: Request, res: Response) => {
   if (!DROPBOX_APP_KEY) {
@@ -119,7 +140,7 @@ router.get('/dropbox-auth-url', (req: Request, res: Response) => {
     client_id: DROPBOX_APP_KEY,
     redirect_uri: DROPBOX_REDIRECT_URI,
     response_type: 'code',
-    token_access_type: 'online',
+    token_access_type: 'offline',
     state,
   });
   res.json({
@@ -153,6 +174,7 @@ router.post('/dropbox-token', async (req: Request, res: Response) => {
     );
     res.json({
       access_token: tokenRes.data.access_token,
+      refresh_token: tokenRes.data.refresh_token ?? null,
       account_id: tokenRes.data.account_id,
     });
   } catch (err: any) {
@@ -439,9 +461,11 @@ function parseDropboxError(err: any): string {
   try {
     const data = err?.response?.data;
     if (!data) return 'no response data';
-    if (Buffer.isBuffer(data)) return data.toString('utf8').slice(0, 300);
-    if (typeof data === 'string') return data.slice(0, 300);
-    return JSON.stringify(data).slice(0, 300);
+    // axios s responseType:'arraybuffer' vraci ArrayBuffer nebo Buffer
+    if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8').slice(0, 500);
+    if (Buffer.isBuffer(data)) return data.toString('utf8').slice(0, 500);
+    if (typeof data === 'string') return data.slice(0, 500);
+    return JSON.stringify(data).slice(0, 500);
   } catch {
     return String(err?.message ?? 'unknown');
   }
@@ -495,16 +519,17 @@ async function dropboxDownload(
         } catch (err2: any) {
           const status2 = err2?.response?.status;
           const body2 = parseDropboxError(err2);
-          console.error(`[dropbox-download] ${filename} CHYBA s namespace HTTP ${status2}: ${body2}`);
+          const requestId2 = err2?.response?.headers?.['x-dropbox-request-id'] ?? '';
+          console.error(`[dropbox-download] ${filename} CHYBA s namespace HTTP ${status2} req:${requestId2} body:${body2}`);
           throw err2;
         }
       }
     }
     const status = err?.response?.status;
     const body = parseDropboxError(err);
-    const apiResult = err?.response?.headers?.['dropbox-api-result'] ?? '';
-    const wwwAuth = err?.response?.headers?.['www-authenticate'] ?? '';
-    console.error(`[dropbox-download] ${filename} CHYBA HTTP ${status}: ${body} | api-result: ${apiResult} | www-auth: ${wwwAuth}`);
+    const requestId = err?.response?.headers?.['x-dropbox-request-id'] ?? '';
+    const nsUsed = namespaceId ?? 'none';
+    console.error(`[dropbox-download] ${filename} CHYBA HTTP ${status} ns:${nsUsed} req:${requestId} body:${body}`);
     throw err;
   }
 }
@@ -513,6 +538,7 @@ async function dropboxDownload(
 router.post('/cloud-import', async (req: Request, res: Response) => {
   const {
     source, files, access_token,
+    refresh_token = null,
     settings: rawSettings = {}, hdr_mode = false,
     user_id = null, session_id = null,
   } = req.body;
@@ -557,10 +583,26 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
   (async () => {
     try {
+      // Pro Dropbox OAuth: refresh access token na začátku batche
+      // (online tokeny expirují, offline tokeny lze refreshnout)
+      let effectiveAccessToken = access_token;
+      if (source === 'dropbox_oauth' && refresh_token) {
+        const refreshed = await refreshDropboxToken(refresh_token);
+        if (refreshed) {
+          effectiveAccessToken = refreshed;
+          console.error('[dropbox-batch-info] Token úspěšně refreshnut');
+        } else {
+          console.error('[dropbox-batch-info] Refresh tokenu selhal, používám původní access_token');
+        }
+      } else if (source === 'dropbox_oauth') {
+        console.error('[dropbox-batch-info] Žádný refresh_token, používám access_token přímo');
+      }
+
       // Pro Dropbox Team účty: zjistíme namespace jednou pro celý batch
       // null = osobní účet nebo ještě nezjištěno
       let dropboxNamespaceId: string | null = null;
       let namespaceFetched = false;
+      let _batchLogged = false;
 
       // ← ZMĚNA 2: přidáno sharing_info do type signature
       const streamFileToS3 = async (
@@ -590,17 +632,23 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           // bez sharing_info dostane null místo správného root namespace
           if (!namespaceFetched) {
             namespaceFetched = true;
-            dropboxNamespaceId = await getDropboxNamespaceId(access_token);
+            dropboxNamespaceId = await getDropboxNamespaceId(effectiveAccessToken);
           }
 
           // Priorita: shared folder namespace > user root namespace > null
           const sharedFolderNs = file.sharing_info?.parent_shared_folder_id ?? null;
           const effectiveNamespace = sharedFolderNs ?? dropboxNamespaceId;
 
+          // Logujeme první soubor v batchi pro diagnostiku
+          if (!_batchLogged) {
+            _batchLogged = true;
+            console.error(`[dropbox-batch-info] root_ns:${dropboxNamespaceId} shared_ns:${sharedFolderNs} effective:${effectiveNamespace} arg:${dropboxArg}`);
+          }
+
           // ── 1. Stáhneme z Dropboxu (s effective namespace) ───────────────
           let buffer: Buffer;
           try {
-            buffer = await dropboxDownload(access_token, dropboxArg, file.name, effectiveNamespace);
+            buffer = await dropboxDownload(effectiveAccessToken, dropboxArg, file.name, effectiveNamespace);
           } catch (dropboxErr: any) {
             throw dropboxErr;
           }
