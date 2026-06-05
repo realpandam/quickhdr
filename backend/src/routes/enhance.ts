@@ -489,8 +489,8 @@ async function dropboxDownload(
       'Dropbox-API-Arg': dropboxArg,
       'Content-Type': '',
     };
-    // Namespace header posíláme jen pokud máme ID a nepoužíváme id: referenci
-    // S id: referencí (id:xyz) namespace header není potřeba - Dropbox soubor najde přímo
+    // S id: referencí namespace header NENÍ potřeba - Dropbox najde soubor přímo podle ID
+    // Namespace header posíláme jen při path referencích
     if (nsId && !dropboxArg.includes('"path":"id:')) {
       headers['Dropbox-API-Path-Root'] = JSON.stringify({ '.tag': 'namespace_id', 'namespace_id': nsId });
     }
@@ -604,9 +604,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
       }
 
       // Pro Dropbox Team účty: zjistíme namespace jednou pro celý batch
-      // null = osobní účet nebo ještě nezjištěno
-      let dropboxNamespaceId: string | null = null;
-      let namespaceFetched = false;
+      // Používáme Promise aby paralelní workery čekaly na výsledek místo null
+      let namespacePromise: Promise<string | null> | null = null;
       let _batchLogged = false;
 
       // ← ZMĚNA 2: přidáno sharing_info do type signature
@@ -630,19 +629,20 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         if (source === 'dropbox_oauth') {
           // Vždy používáme file ID - funguje bez ohledu na namespace/mounting
           // path_lower je relativní k namespace kde je soubor mountnutý a nemusí fungovat
+          // file.id může přijít jako "id:xxx" nebo jen "xxx" - normalizujeme
+          const fileId = file.id?.startsWith('id:') ? file.id : `id:${file.id}`;
           const dropboxArg = file.id
-            ? JSON.stringify({ path: `id:${file.id}` })
+            ? JSON.stringify({ path: fileId })
             : JSON.stringify({ path: file.path_lower });
 
-          // Zjistíme user root namespace proaktivně jednou pro celý batch —
-          // musí být před výpočtem effectiveNamespace, jinak první soubor
-          // bez sharing_info dostane null místo správného root namespace
-          if (!namespaceFetched) {
-            namespaceFetched = true;
-            dropboxNamespaceId = await getDropboxNamespaceId(effectiveAccessToken);
+          // Zjistíme user root namespace jednou pro celý batch —
+          // Promise zaručí že všechny paralelní workery dostanou správnou hodnotu
+          if (!namespacePromise) {
+            namespacePromise = getDropboxNamespaceId(effectiveAccessToken);
           }
+          const dropboxNamespaceId = await namespacePromise;
 
-          // Priorita: shared folder namespace > user root namespace > null
+          // S id: referencí namespace nepotřebujeme - ale logujeme pro diagnostiku
           const sharedFolderNs = file.sharing_info?.parent_shared_folder_id ?? null;
           const effectiveNamespace = sharedFolderNs ?? dropboxNamespaceId;
 
