@@ -40,6 +40,7 @@ interface DropboxEntry {
     path_lower: string;
     size?: number;
     modified?: string;
+    sharing_info?: { parent_shared_folder_id?: string } | null; // ← PŘIDÁNO: potřeba pro sdílené složky
 }
 
 type CloudState = 'idle' | 'submitting' | 'accepted' | 'error';
@@ -236,8 +237,13 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
 
         setDropboxAuthState('idle');
 
+        // ← ZMĚNA: přidán sharing_info — backend ho potřebuje pro sdílené složky
         const files = selectedEntries.map(e => ({
-            id: e.id, name: e.name, path_lower: e.path_lower, size: e.size,
+            id: e.id,
+            name: e.name,
+            path_lower: e.path_lower,
+            size: e.size,
+            sharing_info: e.sharing_info ?? null,
         }));
 
         await sendToBackend('dropbox_oauth', files, dropboxToken);
@@ -246,7 +252,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
     // ── Odešli metadata na backend ────────────────────────────────────────────
     const sendToBackend = useCallback(async (
         source: 'dropbox_oauth' | 'google_drive',
-        files: { url?: string; id?: string; path_lower?: string; name: string; mimeType?: string; bytes?: number; size?: number }[],
+        files: { url?: string; id?: string; path_lower?: string; name: string; mimeType?: string; bytes?: number; size?: number; sharing_info?: { parent_shared_folder_id?: string } | null }[],
         token?: string,
     ) => {
         setCloudState('submitting');

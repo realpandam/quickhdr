@@ -101,7 +101,6 @@ async function getDropboxNamespaceId(access_token: string): Promise<string | nul
       { headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' } }
     );
     const namespaceId = res.data?.root_info?.root_namespace_id ?? null;
-    console.log(`[dropbox-namespace] root_namespace_id: ${namespaceId}, root_info tag: ${res.data?.root_info?.['.tag']}`);
     return namespaceId ? String(namespaceId) : null;
   } catch (err: any) {
     console.error(`[dropbox-namespace] Nepodařilo se zjistit namespace: ${err?.message}`);
@@ -178,6 +177,7 @@ router.post('/dropbox-list', async (req: Request, res: Response) => {
       },
       { headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' } }
     );
+    // ← ZMĚNA 1: přidáno sharing_info — frontend ho potřebuje pro sdílené složky
     const entries = (listRes.data.entries ?? []).map((entry: any) => ({
       tag: entry['.tag'],
       id: entry.id,
@@ -185,6 +185,7 @@ router.post('/dropbox-list', async (req: Request, res: Response) => {
       path_lower: entry.path_lower,
       size: entry.size,
       modified: entry.server_modified,
+      sharing_info: entry.sharing_info ?? null,
     }));
     res.json({ entries, has_more: listRes.data.has_more, cursor: listRes.data.cursor });
   } catch (err: any) {
@@ -485,11 +486,9 @@ async function dropboxDownload(
     return Buffer.from(res.data);
   } catch (err: any) {
     if (err?.response?.status === 401 && !namespaceId) {
-      // 401 bez namespace → jsme pravděpodobně Team účet, zjistíme namespace
-      console.log(`[dropbox-download] ${filename} dostал 401, zkouším zjistit Team namespace...`);
+      // 401 bez namespace → Team účet, zjistíme namespace a zkusíme znovu
       const nsId = await getDropboxNamespaceId(access_token);
       if (nsId) {
-        console.log(`[dropbox-download] ${filename} zkouším znovu s namespace ${nsId}`);
         try {
           const res2 = await doRequest(nsId);
           return Buffer.from(res2.data);
@@ -561,8 +560,18 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
       let dropboxNamespaceId: string | null = null;
       let namespaceFetched = false;
 
+      // ← ZMĚNA 2: přidáno sharing_info do type signature
       const streamFileToS3 = async (
-        file: { url?: string; id?: string; path_lower?: string; name: string; mimeType?: string; bytes?: number; size?: number },
+        file: {
+          url?: string;
+          id?: string;
+          path_lower?: string;
+          name: string;
+          mimeType?: string;
+          bytes?: number;
+          size?: number;
+          sharing_info?: { parent_shared_folder_id?: string } | null;
+        },
         upload_url: string,
         correctMime: string
       ): Promise<void> => {
@@ -574,20 +583,22 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             ? JSON.stringify({ path: file.path_lower })
             : JSON.stringify({ path: `id:${file.id}` });
 
-          console.log(`[dropbox-download] ${file.name} → arg: ${dropboxArg}${dropboxNamespaceId ? ` (ns: ${dropboxNamespaceId})` : ''}`);
-
-          // Pokud jsme ještě nezjišťovali namespace a nemáme ho, zjistíme ho
-          // proaktivně hned na začátku (vyhne se zbytečnému 401 na prvním souboru)
+          // Zjistíme user root namespace proaktivně jednou pro celý batch —
+          // musí být před výpočtem effectiveNamespace, jinak první soubor
+          // bez sharing_info dostane null místo správného root namespace
           if (!namespaceFetched) {
             namespaceFetched = true;
             dropboxNamespaceId = await getDropboxNamespaceId(access_token);
           }
 
-          // ── 1. Stáhneme z Dropboxu (s automatickým namespace fallback) ────
+          // Priorita: shared folder namespace > user root namespace > null
+          const sharedFolderNs = file.sharing_info?.parent_shared_folder_id ?? null;
+          const effectiveNamespace = sharedFolderNs ?? dropboxNamespaceId;
+
+          // ── 1. Stáhneme z Dropboxu (s effective namespace) ───────────────
           let buffer: Buffer;
           try {
-            buffer = await dropboxDownload(access_token, dropboxArg, file.name, dropboxNamespaceId);
-            console.log(`[dropbox-download] ${file.name} OK — ${buffer.length} bytes`);
+            buffer = await dropboxDownload(access_token, dropboxArg, file.name, effectiveNamespace);
           } catch (dropboxErr: any) {
             throw dropboxErr;
           }
@@ -599,7 +610,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
               maxBodyLength: Infinity, maxContentLength: Infinity,
               timeout: 10 * 60 * 1000,
             });
-            console.log(`[s3-upload] ${file.name} OK`);
           } catch (s3Err: any) {
             const s3Status = s3Err?.response?.status;
             const s3Body = s3Err?.response?.data
@@ -671,7 +681,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           for (let attempt = 0; attempt < maxAttempts && !success; attempt++) {
             try {
               await streamFileToS3(file, upload_url, correctMime);
-              console.log(`[cloud-import] Bracket uploadnut: ${file.name}`);
               success = true;
             } catch (err: any) {
               console.error(`[cloud-import] Bracket ${file.name} pokus ${attempt + 1} selhal: ${err?.response?.status} ${err?.message}`);
@@ -693,20 +702,26 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         };
         await axios.post(`${API_BASE}/v3/orders/${order_id}/process`, mergeBody,
           { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
-        console.log(`[cloud-import] HDR order ${order_id} spuštěn`);
 
       } else if (!hdr_mode && upload_batch_id) {
-        const validFiles = (files as { name: string; url?: string; id?: string; path_lower?: string; mimeType?: string; bytes?: number; size?: number }[]).filter(f => {
+        const validFiles = (files as {
+          name: string;
+          url?: string;
+          id?: string;
+          path_lower?: string;
+          mimeType?: string;
+          bytes?: number;
+          size?: number;
+          sharing_info?: { parent_shared_folder_id?: string } | null;
+        }[]).filter(f => {
           const ext = path.extname(f.name).toLowerCase().replace('.', '');
           if (!ALLOWED_EXTENSIONS.has(ext)) {
-            console.warn(`[cloud-import] Přeskočen nepodporovaný formát: ${f.name}`);
             return false;
           }
           return true;
         });
 
         if (validFiles.length === 0) {
-          console.warn('[cloud-import] Non-HDR: žádné podporované soubory');
           return;
         }
 
@@ -741,8 +756,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           }
         });
 
-        console.log(`[cloud-import] Non-HDR: zaregistrováno ${prepared.length}/${validFiles.length} souborů (batch ${upload_batch_id})`);
-
         const uploadConcurrency = source === 'dropbox_oauth' ? 3 : 5;
         const maxAttempts = source === 'dropbox_oauth' ? 1 : 3;
 
@@ -751,7 +764,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           for (let attempt = 0; attempt < maxAttempts && !success; attempt++) {
             try {
               await streamFileToS3(item.file, item.upload_url, item.correctMime);
-              console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
               success = true;
             } catch (uploadErr: any) {
               console.error(`[cloud-import] ${item.file.name} pokus ${attempt + 1} selhal: ${uploadErr?.response?.status} ${uploadErr?.message}`);
@@ -762,8 +774,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             console.error(`[cloud-import] ${item.file.name} (${item.image_id}) selhal`);
           }
         });
-
-        console.log(`[cloud-import] Non-HDR batch ${upload_batch_id} dokončen, ${prepared.length} souborů`);
       }
     } catch (err: any) {
       console.error(`[cloud-import] Fatální chyba: ${err?.message}`);
@@ -812,7 +822,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
   res.status(200).json({ ok: true });
   try {
     const { event, image_id, error, order_id, order_is_processing } = req.body;
-    console.log('[webhook] payload:', JSON.stringify({ event, image_id, order_id, order_is_processing, error }));
     if (event !== 'image_processed' || error) return;
 
     let order: any = null;
@@ -826,7 +835,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
       const { data: existingById } = await supabase
         .from('orders').select('id').eq('image_id', image_id).maybeSingle();
       if (existingById) {
-        console.log(`[webhook] HDR image_id ${image_id} již existuje, přeskakuji`);
         return;
       }
       const { data: hdrOrders } = await supabase
@@ -837,7 +845,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
       if (pendingRow) {
         await supabase.from('orders').update({ image_id }).eq('id', pendingRow.id);
         order = { ...pendingRow, image_id };
-        console.log(`[webhook] HDR první výsledek: placeholder → ${image_id}`);
       } else {
         await supabase.from('orders').insert({
           image_id, filename: null, payment_status: 'pending', amount_czk: PRICE_CZK,
@@ -846,7 +853,6 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
           upload_batch_id: metaRow.upload_batch_id,
         });
         order = { ...metaRow, image_id };
-        console.log(`[webhook] HDR další výsledek vložen: ${image_id}`);
       }
     }
 
