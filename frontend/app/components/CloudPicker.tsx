@@ -1,7 +1,7 @@
 'use client';
 
 import Script from 'next/script';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { API_URL } from '../lib/config';
 import { supabase } from '../lib/supabase';
@@ -40,11 +40,13 @@ interface DropboxEntry {
     path_lower: string;
     size?: number;
     modified?: string;
-    sharing_info?: { parent_shared_folder_id?: string } | null; // ← PŘIDÁNO: potřeba pro sdílené složky
+    sharing_info?: { parent_shared_folder_id?: string } | null;
 }
 
 type CloudState = 'idle' | 'submitting' | 'accepted' | 'error';
 type DropboxAuthState = 'idle' | 'authenticating' | 'browsing';
+type SortField = 'name' | 'size' | 'modified';
+type SortDir = 'asc' | 'desc';
 
 const SUPPORTED_EXTENSIONS = new Set([
     'jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'heic', 'heif', 'avif', 'bmp', 'gif',
@@ -61,6 +63,11 @@ function formatSize(bytes?: number): string {
     if (!bytes) return '';
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(iso?: string): string {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
 export default function CloudPicker({ onFiles, settings, hdrMode = false }: Props) {
@@ -82,6 +89,12 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
     const [dropboxSelected, setDropboxSelected] = useState<Set<string>>(new Set());
     const [dropboxError, setDropboxError] = useState('');
     const dropboxCsrfState = useRef<string>('');
+
+    // Nové stavy pro search, sort, filter
+    const [searchQuery, setSearchQuery] = useState('');
+    const [sortField, setSortField] = useState<SortField>('name');
+    const [sortDir, setSortDir] = useState<SortDir>('asc');
+    const [showOnlyImages, setShowOnlyImages] = useState(false);
 
     const openDropboxOAuth = useCallback(async () => {
         try {
@@ -136,6 +149,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                     setDropboxToken(access_token);
                     setDropboxRefreshToken(refresh_token ?? '');
                     setDropboxAuthState('browsing');
+                    setSearchQuery('');
                     await loadDropboxFolder('', access_token);
                 } catch (err) {
                     setDropboxAuthState('idle');
@@ -165,6 +179,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
 
         setDropboxLoading(true);
         setDropboxError('');
+        setSearchQuery('');
 
         try {
             const res = await fetch(`${API_URL}/api/enhance/dropbox-list`, {
@@ -175,13 +190,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
 
             if (!res.ok) throw new Error('Nepodařilo se načíst složku');
             const data = await res.json();
-
-            const sorted = (data.entries as DropboxEntry[]).sort((a, b) => {
-                if (a.tag !== b.tag) return a.tag === 'folder' ? -1 : 1;
-                return a.name.localeCompare(b.name);
-            });
-
-            setDropboxEntries(sorted);
+            setDropboxEntries(data.entries as DropboxEntry[]);
             setDropboxPath(folderPath);
         } catch (err) {
             setDropboxError(err instanceof Error ? err.message : 'Chyba při načítání složky');
@@ -189,6 +198,45 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
             setDropboxLoading(false);
         }
     }, [dropboxToken]);
+
+    // Filtrované + seřazené entries
+    const filteredEntries = useMemo(() => {
+        let entries = [...dropboxEntries];
+
+        // Filtr: pouze obrázky
+        if (showOnlyImages) {
+            entries = entries.filter(e => e.tag === 'folder' || isSupportedFile(e.name));
+        }
+
+        // Hledání
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            entries = entries.filter(e => e.name.toLowerCase().includes(q));
+        }
+
+        // Složky vždy nahoře, pak soubory
+        entries.sort((a, b) => {
+            if (a.tag !== b.tag) return a.tag === 'folder' ? -1 : 1;
+            let cmp = 0;
+            if (sortField === 'name') cmp = a.name.localeCompare(b.name);
+            else if (sortField === 'size') cmp = (a.size ?? 0) - (b.size ?? 0);
+            else if (sortField === 'modified') cmp = (a.modified ?? '').localeCompare(b.modified ?? '');
+            return sortDir === 'asc' ? cmp : -cmp;
+        });
+
+        return entries;
+    }, [dropboxEntries, searchQuery, sortField, sortDir, showOnlyImages]);
+
+    const handleSort = useCallback((field: SortField) => {
+        setSortField(prev => {
+            if (prev === field) {
+                setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                return field;
+            }
+            setSortDir('asc');
+            return field;
+        });
+    }, []);
 
     const navigateInto = useCallback((entry: DropboxEntry) => {
         if (entry.tag !== 'folder') return;
@@ -215,31 +263,36 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
         });
     }, []);
 
-    const selectAllInFolder = useCallback(() => {
-        const supportedFiles = dropboxEntries.filter(e => e.tag === 'file' && isSupportedFile(e.name));
-        const allSelected = supportedFiles.every(e => dropboxSelected.has(e.id));
-        if (allSelected) {
+    const supportedFilesInView = useMemo(
+        () => filteredEntries.filter(e => e.tag === 'file' && isSupportedFile(e.name)),
+        [filteredEntries]
+    );
+
+    const allViewSelected = supportedFilesInView.length > 0 && supportedFilesInView.every(e => dropboxSelected.has(e.id));
+
+    const selectAllInView = useCallback(() => {
+        if (allViewSelected) {
             setDropboxSelected(prev => {
                 const next = new Set(prev);
-                supportedFiles.forEach(e => next.delete(e.id));
+                supportedFilesInView.forEach(e => next.delete(e.id));
                 return next;
             });
         } else {
             setDropboxSelected(prev => {
                 const next = new Set(prev);
-                supportedFiles.forEach(e => next.add(e.id));
+                supportedFilesInView.forEach(e => next.add(e.id));
                 return next;
             });
         }
-    }, [dropboxEntries, dropboxSelected]);
+    }, [supportedFilesInView, allViewSelected]);
 
     const confirmDropboxSelection = useCallback(async () => {
+        // Vybereme ze všech entries (ne jen filtrovaných) podle selected IDs
         const selectedEntries = dropboxEntries.filter(e => dropboxSelected.has(e.id));
         if (selectedEntries.length === 0) { setDropboxError('Nevybrali jste žádné soubory.'); return; }
 
         setDropboxAuthState('idle');
 
-        // ← ZMĚNA: přidán sharing_info — backend ho potřebuje pro sdílené složky
         const files = selectedEntries.map(e => ({
             id: e.id,
             name: e.name,
@@ -249,9 +302,8 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
         }));
 
         await sendToBackend('dropbox_oauth', files, dropboxToken, dropboxRefreshToken);
-    }, [dropboxEntries, dropboxSelected, dropboxToken]);
+    }, [dropboxEntries, dropboxSelected, dropboxToken, dropboxRefreshToken]);
 
-    // ── Odešli metadata na backend ────────────────────────────────────────────
     const sendToBackend = useCallback(async (
         source: 'dropbox_oauth' | 'google_drive',
         files: { url?: string; id?: string; path_lower?: string; name: string; mimeType?: string; bytes?: number; size?: number; sharing_info?: { parent_shared_folder_id?: string } | null }[],
@@ -282,19 +334,16 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
             if (res.status === 202) {
                 const data = await res.json();
 
-                // HDR nepřihlášený — přesměruj na order stránku s pollingem
                 if (!user && hdrMode && data.order_id) {
                     window.location.href = `/order/hdr_pending_${data.order_id}`;
                     return;
                 }
 
-                // Non-HDR nepřihlášený — přesměruj na processing stránku se spinnerem
                 if (!user && data.upload_batch_id) {
                     window.location.href = `/processing/${data.upload_batch_id}?count=${files.length}&source=${source}`;
                     return;
                 }
 
-                // Přihlášený uživatel (HDR i non-HDR) — zůstane na stránce, dostane email
                 setCloudState('accepted');
             } else {
                 const data = await res.json().catch(() => ({}));
@@ -307,7 +356,6 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
         }
     }, [settings, hdrMode]);
 
-    // ── Google Drive Picker ───────────────────────────────────────────────────
     const showPicker = useCallback((token: string) => {
         window.gapi.load('picker', () => {
             setTimeout(() => {
@@ -351,13 +399,15 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
     }, [showPicker]);
 
     const isbusy = cloudState === 'submitting';
-    const supportedFilesInFolder = dropboxEntries.filter(e => e.tag === 'file' && isSupportedFile(e.name));
-    const allFolderSelected = supportedFilesInFolder.length > 0 && supportedFilesInFolder.every(e => dropboxSelected.has(e.id));
     const currentFolderName = dropboxPath ? dropboxPath.split('/').filter(Boolean).pop() ?? 'Dropbox' : 'Dropbox';
 
-    // Portal mount guard — createPortal nefunguje na serveru
     const [mounted, setMounted] = useState(false);
     useEffect(() => { setMounted(true); }, []);
+
+    const SortIcon = ({ field }: { field: SortField }) => {
+        if (sortField !== field) return <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>↕</span>;
+        return <span style={{ color: 'var(--accent)', fontSize: 10 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>;
+    };
 
     return (
         <>
@@ -404,38 +454,93 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 </button>
             </div>
 
-            {/* Dropbox file browser modal — renderujeme do body přes portal aby fixed fungoval správně */}
+            {/* Dropbox file browser modal */}
             {mounted && dropboxAuthState === 'browsing' && createPortal(
                 <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: '#000000e8', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
-                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: 'min(600px, calc(100vh - 3rem))', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(0,0,0,0.8)', overflow: 'hidden' }}>
+                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, width: '100%', maxWidth: 600, maxHeight: 'min(680px, calc(100vh - 3rem))', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(0,0,0,0.8)', overflow: 'hidden' }}>
+
                         {/* Header */}
-                        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                        <div style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                             {dropboxPathHistory.length > 0 && (
-                                <button onClick={navigateBack} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 6px', borderRadius: 6, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                                <button onClick={navigateBack} title="Zpět" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 6px', borderRadius: 6, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
                                 </button>
                             )}
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="#0061FF" style={{ flexShrink: 0 }}>
                                 <path d="M6 2L0 6l6 4-6 4 6 4 6-4-6-4 6-4L6 2zm12 0l-6 4 6 4-6 4 6 4 6-4-6-4 6-4-6-4zm-6 9l-6 4 6 4 6-4-6-4z" />
                             </svg>
-                            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentFolderName}</span>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {currentFolderName}
+                            </span>
                             <button onClick={() => { setDropboxAuthState('idle'); setDropboxSelected(new Set()); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 6px', borderRadius: 6, flexShrink: 0 }}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
                             </button>
                         </div>
 
-                        {/* Toolbar */}
-                        {supportedFilesInFolder.length > 0 && (
-                            <div style={{ padding: '0.6rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: 'rgba(255,255,255,0.02)' }}>
-                                <button onClick={selectAllInFolder} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--accent)', padding: 0, fontWeight: 500 }}>
-                                    {allFolderSelected ? 'Odznačit vše' : `Vybrat vše (${supportedFilesInFolder.length})`}
-                                </button>
-                                {dropboxSelected.size > 0 && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{dropboxSelected.size} vybráno</span>}
+                        {/* Search + filtry */}
+                        <div style={{ padding: '0.625rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, background: 'rgba(255,255,255,0.02)' }}>
+                            {/* Search */}
+                            <div style={{ flex: 1, position: 'relative' }}>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }}>
+                                    <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+                                </svg>
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    placeholder="Hledat soubory…"
+                                    style={{ width: '100%', paddingLeft: 30, paddingRight: searchQuery ? 28 : 10, paddingTop: 6, paddingBottom: 6, background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, color: 'var(--text-primary)', outline: 'none', boxSizing: 'border-box' }}
+                                />
+                                {searchQuery && (
+                                    <button onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, display: 'flex' }}>
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                    </button>
+                                )}
                             </div>
-                        )}
+
+                            {/* Filtr: jen obrázky */}
+                            <button
+                                onClick={() => setShowOnlyImages(v => !v)}
+                                title={showOnlyImages ? 'Zobrazit vše' : 'Jen podporované formáty'}
+                                style={{ background: showOnlyImages ? 'rgba(123,92,240,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${showOnlyImages ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 7, padding: '5px 10px', fontSize: 11, color: showOnlyImages ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: showOnlyImages ? 600 : 400 }}
+                            >
+                                📷 Jen foto
+                            </button>
+                        </div>
+
+                        {/* Toolbar: select all + sort */}
+                        <div style={{ padding: '0.5rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                            {/* Select all */}
+                            <button
+                                onClick={selectAllInView}
+                                disabled={supportedFilesInView.length === 0}
+                                style={{ background: 'none', border: 'none', cursor: supportedFilesInView.length === 0 ? 'default' : 'pointer', fontSize: 12, color: 'var(--accent)', padding: 0, fontWeight: 500, opacity: supportedFilesInView.length === 0 ? 0.4 : 1 }}
+                            >
+                                {allViewSelected ? 'Odznačit vše' : `Vybrat vše${searchQuery ? ' (výsledky)' : ''} (${supportedFilesInView.length})`}
+                            </button>
+
+                            <span style={{ flex: 1 }} />
+
+                            {/* Počet vybraných */}
+                            {dropboxSelected.size > 0 && (
+                                <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500 }}>
+                                    {dropboxSelected.size} vybráno
+                                </span>
+                            )}
+
+                            {/* Sort buttons */}
+                            <div style={{ display: 'flex', gap: 2 }}>
+                                {(['name', 'size', 'modified'] as SortField[]).map(f => (
+                                    <button key={f} onClick={() => handleSort(f)}
+                                        style={{ background: sortField === f ? 'rgba(123,92,240,0.15)' : 'none', border: `1px solid ${sortField === f ? 'rgba(123,92,240,0.4)' : 'transparent'}`, borderRadius: 5, padding: '3px 8px', fontSize: 11, color: sortField === f ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                        {{ name: 'Název', size: 'Vel.', modified: 'Datum' }[f]} <SortIcon field={f} />
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
 
                         {/* Obsah složky */}
-                        <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0' }}>
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0' }}>
                             {dropboxLoading ? (
                                 <div style={{ padding: '2rem', textAlign: 'center' }}>
                                     <div style={{ width: 32, height: 32, border: '2px solid var(--border)', borderTop: '2px solid var(--accent)', borderRadius: '50%', margin: '0 auto 0.75rem', animation: 'spin 1s linear infinite' }} />
@@ -443,34 +548,48 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                                 </div>
                             ) : dropboxError ? (
                                 <div style={{ padding: '1rem 1.25rem' }}><p style={{ fontSize: 13, color: '#ef4444', margin: 0 }}>{dropboxError}</p></div>
-                            ) : dropboxEntries.length === 0 ? (
-                                <div style={{ padding: '2rem', textAlign: 'center' }}><p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>Složka je prázdná</p></div>
-                            ) : dropboxEntries.map(entry => {
+                            ) : filteredEntries.length === 0 ? (
+                                <div style={{ padding: '2rem', textAlign: 'center' }}>
+                                    <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+                                        {searchQuery ? 'Žádné výsledky pro „' + searchQuery + '"' : 'Složka je prázdná'}
+                                    </p>
+                                </div>
+                            ) : filteredEntries.map(entry => {
                                 const isFolder = entry.tag === 'folder';
                                 const isSupported = !isFolder && isSupportedFile(entry.name);
                                 const isSelected = dropboxSelected.has(entry.id);
                                 const isUnsupported = !isFolder && !isSupported;
                                 return (
-                                    <div key={entry.id} onClick={() => isFolder ? navigateInto(entry) : toggleSelect(entry)}
-                                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0.55rem 1.25rem', cursor: isUnsupported ? 'default' : 'pointer', opacity: isUnsupported ? 0.35 : 1, background: isSelected ? 'rgba(123,92,240,0.12)' : 'transparent', transition: 'background 0.1s' }}
+                                    <div key={entry.id}
+                                        onClick={() => isFolder ? navigateInto(entry) : toggleSelect(entry)}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0.45rem 1.25rem', cursor: isUnsupported ? 'default' : 'pointer', opacity: isUnsupported ? 0.3 : 1, background: isSelected ? 'rgba(123,92,240,0.12)' : 'transparent', transition: 'background 0.1s' }}
                                         onMouseEnter={e => { if (!isUnsupported && !isSelected) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)'; }}
                                         onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
                                     >
+                                        {/* Checkbox pro soubory */}
                                         {!isFolder && (
-                                            <div style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0, border: isSelected ? '2px solid var(--accent)' : '2px solid var(--border)', background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
-                                                {isSelected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5 4.5-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                                            <div style={{ width: 15, height: 15, borderRadius: 3, flexShrink: 0, border: isSelected ? '2px solid var(--accent)' : '2px solid var(--border)', background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
+                                                {isSelected && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5 4.5-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                                             </div>
                                         )}
+                                        {/* Ikona */}
                                         {isFolder ? (
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="#FACC15" style={{ flexShrink: 0 }}><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" /></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="#FACC15" style={{ flexShrink: 0 }}><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" /></svg>
                                         ) : (
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ flexShrink: 0, color: isSupported ? 'var(--text-secondary)' : 'var(--text-muted)' }}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /><polyline points="14 2 14 8 20 8" /></svg>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ flexShrink: 0, color: isSupported ? 'var(--text-secondary)' : 'var(--text-muted)' }}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /><polyline points="14 2 14 8 20 8" /></svg>
                                         )}
-                                        <div style={{ flex: 1, overflow: 'hidden' }}>
+                                        {/* Název + meta */}
+                                        <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
                                             <p style={{ fontSize: 13, margin: 0, fontWeight: isFolder ? 500 : 400, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</p>
-                                            {!isFolder && entry.size && <p style={{ fontSize: 11, margin: 0, color: 'var(--text-muted)' }}>{formatSize(entry.size)}</p>}
                                         </div>
-                                        {isFolder && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><path d="M9 18l6-6-6-6" /></svg>}
+                                        {/* Meta: velikost + datum */}
+                                        {!isFolder && (
+                                            <div style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'center' }}>
+                                                {entry.size && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatSize(entry.size)}</span>}
+                                                {entry.modified && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatDate(entry.modified)}</span>}
+                                            </div>
+                                        )}
+                                        {isFolder && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><path d="M9 18l6-6-6-6" /></svg>}
                                     </div>
                                 );
                             })}
@@ -479,12 +598,19 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                         {/* Footer */}
                         <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexShrink: 0 }}>
                             <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                                {dropboxSelected.size > 0 ? `${dropboxSelected.size} souborů vybráno` : 'Vyberte soubory nebo složku'}
+                                {dropboxSelected.size > 0 ? `${dropboxSelected.size} souborů vybráno` : 'Vyberte soubory'}
                             </span>
-                            <button onClick={confirmDropboxSelection} disabled={dropboxSelected.size === 0} className="btn"
-                                style={{ fontSize: 13, padding: '8px 20px', opacity: dropboxSelected.size === 0 ? 0.4 : 1, background: 'var(--accent)' }}>
-                                Importovat ({dropboxSelected.size})
-                            </button>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                {dropboxSelected.size > 0 && (
+                                    <button onClick={() => setDropboxSelected(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', padding: '6px 10px' }}>
+                                        Zrušit výběr
+                                    </button>
+                                )}
+                                <button onClick={confirmDropboxSelection} disabled={dropboxSelected.size === 0} className="btn"
+                                    style={{ fontSize: 13, padding: '8px 20px', opacity: dropboxSelected.size === 0 ? 0.4 : 1, background: 'var(--accent)' }}>
+                                    Importovat ({dropboxSelected.size})
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
@@ -492,7 +618,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 document.body
             )}
 
-            {/* Odesílání na backend — taky přes portal */}
+            {/* Odesílání na backend */}
             {mounted && cloudState === 'submitting' && createPortal(
                 <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: '#000000e8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: '2rem 2.5rem', width: 340, textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
@@ -505,7 +631,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
                 document.body
             )}
 
-            {/* Přijato (pouze pro přihlášené) */}
+            {/* Přijato */}
             {cloudState === 'accepted' && (
                 <div style={{ margin: '1rem 0', padding: '1rem 1.25rem', background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 10, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                     <span style={{ fontSize: 20, flexShrink: 0 }}>✓</span>
