@@ -102,11 +102,9 @@ async function getDropboxNamespaceId(access_token: string): Promise<string | nul
     );
     const rootInfo = res.data?.root_info;
     const namespaceId = rootInfo?.root_namespace_id ?? null;
-    // Logujeme celý root_info pro diagnostiku
-    console.error(`[dropbox-namespace] root_info: ${JSON.stringify(rootInfo)} → namespace: ${namespaceId}`);
     return namespaceId ? String(namespaceId) : null;
   } catch (err: any) {
-    console.error(`[dropbox-namespace] Chyba při zjišťování namespace: ${err?.message} status:${err?.response?.status} body:${JSON.stringify(err?.response?.data ?? '')}`);
+    console.error(`[dropbox-namespace] Chyba: ${err?.message}`);
     return null;
   }
 }
@@ -524,17 +522,14 @@ async function dropboxDownload(
         } catch (err2: any) {
           const status2 = err2?.response?.status;
           const body2 = parseDropboxError(err2);
-          const requestId2 = err2?.response?.headers?.['x-dropbox-request-id'] ?? '';
-          console.error(`[dropbox-download] ${filename} CHYBA s namespace HTTP ${status2} req:${requestId2} body:${body2}`);
+          console.error(`[dropbox-download] ${filename} CHYBA s namespace HTTP ${status2}: ${body2}`);
           throw err2;
         }
       }
     }
     const status = err?.response?.status;
     const body = parseDropboxError(err);
-    const requestId = err?.response?.headers?.['x-dropbox-request-id'] ?? '';
-    const nsUsed = namespaceId ?? 'none';
-    console.error(`[dropbox-download] ${filename} CHYBA HTTP ${status} ns:${nsUsed} req:${requestId} body:${body}`);
+    console.error(`[dropbox-download] ${filename} CHYBA HTTP ${status}: ${body}`);
     throw err;
   }
 }
@@ -595,18 +590,15 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const refreshed = await refreshDropboxToken(refresh_token);
         if (refreshed) {
           effectiveAccessToken = refreshed;
-          console.error('[dropbox-batch-info] Token úspěšně refreshnut');
+
         } else {
-          console.error('[dropbox-batch-info] Refresh tokenu selhal, používám původní access_token');
+
         }
-      } else if (source === 'dropbox_oauth') {
-        console.error('[dropbox-batch-info] Žádný refresh_token, používám access_token přímo');
       }
 
       // Pro Dropbox Team účty: zjistíme namespace jednou pro celý batch
       // Používáme Promise aby paralelní workery čekaly na výsledek místo null
       let namespacePromise: Promise<string | null> | null = null;
-      let _batchLogged = false;
 
       // ← ZMĚNA 2: přidáno sharing_info do type signature
       const streamFileToS3 = async (
@@ -645,12 +637,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           // S id: referencí namespace nepotřebujeme - ale logujeme pro diagnostiku
           const sharedFolderNs = file.sharing_info?.parent_shared_folder_id ?? null;
           const effectiveNamespace = sharedFolderNs ?? dropboxNamespaceId;
-
-          // Logujeme první soubor v batchi pro diagnostiku
-          if (!_batchLogged) {
-            _batchLogged = true;
-            console.error(`[dropbox-batch-info] root_ns:${dropboxNamespaceId} shared_ns:${sharedFolderNs} effective:${effectiveNamespace} arg:${dropboxArg}`);
-          }
 
           // ── 1. Stáhneme z Dropboxu (s effective namespace) ───────────────
           let buffer: Buffer;
@@ -730,8 +716,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           }
         });
 
-        const uploadConcurrency = source === 'dropbox_oauth' ? 3 : 5;
-        const maxAttempts = source === 'dropbox_oauth' ? 1 : 3;
+        const uploadConcurrency = source === 'dropbox_oauth' ? 2 : 5;
+        const maxAttempts = source === 'dropbox_oauth' ? 3 : 3;
 
         await pLimit(bracketUploads, uploadConcurrency, async ({ file, upload_url, correctMime }) => {
           let success = false;
@@ -813,8 +799,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           }
         });
 
-        const uploadConcurrency = source === 'dropbox_oauth' ? 3 : 5;
-        const maxAttempts = source === 'dropbox_oauth' ? 1 : 3;
+        const uploadConcurrency = source === 'dropbox_oauth' ? 2 : 5;
+        const maxAttempts = source === 'dropbox_oauth' ? 3 : 3;
 
         await pLimit(prepared, uploadConcurrency, async (item) => {
           let success = false;
