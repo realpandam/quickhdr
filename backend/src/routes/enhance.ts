@@ -502,7 +502,9 @@ async function dropboxDownload(
     }
     const status = err?.response?.status;
     const body = parseDropboxError(err);
-    console.error(`[dropbox-download] ${filename} CHYBA HTTP ${status}: ${body}`);
+    const apiResult = err?.response?.headers?.['dropbox-api-result'] ?? '';
+    const wwwAuth = err?.response?.headers?.['www-authenticate'] ?? '';
+    console.error(`[dropbox-download] ${filename} CHYBA HTTP ${status}: ${body} | api-result: ${apiResult} | www-auth: ${wwwAuth}`);
     throw err;
   }
 }
