@@ -176,69 +176,39 @@ router.post('/dropbox-list', async (req: Request, res: Response) => {
 // ── Batch status ──────────────────────────────────────────────────────────────
 router.get('/batch-status/:batchId', async (req: Request, res: Response) => {
   const { batchId } = req.params;
-
   try {
     const { data: orders, error } = await supabase
       .from('orders')
       .select('image_id, filename')
       .eq('upload_batch_id', batchId);
-
     if (error) throw error;
-
     if (!orders || orders.length === 0) {
-      res.json({
-        phase: 'uploading',
-        total: 0,
-        uploaded: 0,
-        processed: 0,
-        failed: 0,
-        image_ids: [],
-      });
+      res.json({ phase: 'uploading', total: 0, uploaded: 0, processed: 0, failed: 0, image_ids: [] });
       return;
     }
-
     const statuses = await Promise.allSettled(
       orders.map(async (o) => {
         try {
-          const r = await axios.get(`${API_BASE}/v3/images/${o.image_id}`, {
-            headers: { 'x-api-key': API_KEY },
-          });
+          const r = await axios.get(`${API_BASE}/v3/images/${o.image_id}`, { headers: { 'x-api-key': API_KEY } });
           return { image_id: o.image_id, status: r.data.status as string };
         } catch {
           return { image_id: o.image_id, status: 'uploading' };
         }
       })
     );
-
     const results = statuses.map((s, i) =>
-      s.status === 'fulfilled'
-        ? s.value
-        : { image_id: orders[i].image_id, status: 'error' }
+      s.status === 'fulfilled' ? s.value : { image_id: orders[i].image_id, status: 'error' }
     );
-
     const processed = results.filter(r => r.status === 'processed');
     const failed = results.filter(r => ['failed', 'error'].includes(r.status));
     const uploading = results.filter(r => r.status === 'uploading');
     const total = results.length;
     const done = processed.length + failed.length;
-
     let phase: 'uploading' | 'processing' | 'done';
-    if (uploading.length === total) {
-      phase = 'uploading';
-    } else if (done === total) {
-      phase = 'done';
-    } else {
-      phase = 'processing';
-    }
-
-    res.json({
-      phase,
-      total,
-      uploaded: total - uploading.length,
-      processed: processed.length,
-      failed: failed.length,
-      image_ids: processed.map(r => r.image_id),
-    });
+    if (uploading.length === total) phase = 'uploading';
+    else if (done === total) phase = 'done';
+    else phase = 'processing';
+    res.json({ phase, total, uploaded: total - uploading.length, processed: processed.length, failed: failed.length, image_ids: processed.map(r => r.image_id) });
   } catch (err) {
     console.error('[batch-status] Chyba:', err);
     res.status(500).json({ error: 'Nepodařilo se zjistit stav batche' });
@@ -504,6 +474,12 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
   (async () => {
     try {
+      // ── streamFileToS3 ──────────────────────────────────────────────────────
+      // DŮLEŽITÉ: Pro dropbox_oauth NERETRYUJEME download — každý retry
+      // způsobuje nový Dropbox request se stejným tokenem, který Dropbox odmítne.
+      // Místo toho stáhneme soubor JEDNOU do bufferu a pak uploadujeme.
+      // Retry logika výše (pLimit loop) tedy pro dropbox_oauth nemá smysl
+      // a je nahrazena jednorázovým pokusem s lepším error logem.
       const streamFileToS3 = async (
         file: { url?: string; id?: string; path_lower?: string; name: string; mimeType?: string; bytes?: number; size?: number },
         upload_url: string,
@@ -513,17 +489,16 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
         if (source === 'dropbox_oauth') {
-          // path_lower jako primární (funguje se sdílenými složkami),
-          // id: jako fallback pokud path_lower chybí
           const dropboxArg = file.path_lower
             ? JSON.stringify({ path: file.path_lower })
             : JSON.stringify({ path: `id:${file.id}` });
 
           console.log(`[dropbox-download] ${file.name} → arg: ${dropboxArg}`);
 
-          let sourceResponse: any;
+          // ── 1. Stáhneme z Dropboxu ────────────────────────────────────────
+          let buffer: Buffer;
           try {
-            sourceResponse = await axios.post(
+            const sourceResponse = await axios.post(
               'https://content.dropboxapi.com/2/files/download',
               null,
               {
@@ -536,6 +511,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
                 timeout: 10 * 60 * 1000,
               }
             );
+            buffer = Buffer.from(sourceResponse.data);
+            console.log(`[dropbox-download] ${file.name} OK — ${buffer.length} bytes`);
           } catch (dropboxErr: any) {
             const status = dropboxErr?.response?.status;
             const body = parseDropboxError(dropboxErr);
@@ -543,11 +520,24 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             throw dropboxErr;
           }
 
-          const buffer = Buffer.from(sourceResponse.data);
-          await axios.put(upload_url, buffer, {
-            headers: { 'Content-Type': contentTypeFromUrl, 'Content-Length': buffer.length },
-            maxBodyLength: Infinity, maxContentLength: Infinity,
-          });
+          // ── 2. Uploadujeme na S3 ──────────────────────────────────────────
+          try {
+            await axios.put(upload_url, buffer, {
+              headers: { 'Content-Type': contentTypeFromUrl, 'Content-Length': buffer.length },
+              maxBodyLength: Infinity, maxContentLength: Infinity,
+              timeout: 10 * 60 * 1000,
+            });
+            console.log(`[s3-upload] ${file.name} OK`);
+          } catch (s3Err: any) {
+            const s3Status = s3Err?.response?.status;
+            const s3Body = s3Err?.response?.data
+              ? (Buffer.isBuffer(s3Err.response.data)
+                ? s3Err.response.data.toString('utf8').slice(0, 300)
+                : String(s3Err.response.data).slice(0, 300))
+              : s3Err?.message;
+            console.error(`[s3-upload] ${file.name} CHYBA HTTP ${s3Status}: ${s3Body}`);
+            throw s3Err;
+          }
 
         } else if (source === 'dropbox') {
           const url = (file.url as string).replace('dl=0', 'dl=1');
@@ -601,20 +591,24 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           }
         });
 
+        // Pro dropbox_oauth: bez retry (jeden pokus) — retry způsobuje 401
+        // Pro ostatní zdroje: 3 pokusy jako dřív
         const uploadConcurrency = source === 'dropbox_oauth' ? 3 : 5;
+        const maxAttempts = source === 'dropbox_oauth' ? 1 : 3;
+
         await pLimit(bracketUploads, uploadConcurrency, async ({ file, upload_url, correctMime }) => {
           let success = false;
-          for (let attempt = 0; attempt < 3 && !success; attempt++) {
+          for (let attempt = 0; attempt < maxAttempts && !success; attempt++) {
             try {
               await streamFileToS3(file, upload_url, correctMime);
               console.log(`[cloud-import] Bracket uploadnut: ${file.name}`);
               success = true;
             } catch (err: any) {
               console.error(`[cloud-import] Bracket ${file.name} pokus ${attempt + 1} selhal: ${err?.response?.status} ${err?.message}`);
-              if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+              if (attempt < maxAttempts - 1) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
             }
           }
-          if (!success) console.error(`[cloud-import] Bracket ${file.name} selhal po 3 pokusech`);
+          if (!success) console.error(`[cloud-import] Bracket ${file.name} selhal`);
         });
 
         const mergeBody: Record<string, unknown> = {
@@ -680,20 +674,22 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         console.log(`[cloud-import] Non-HDR: zaregistrováno ${prepared.length}/${validFiles.length} souborů (batch ${upload_batch_id})`);
 
         const uploadConcurrency = source === 'dropbox_oauth' ? 3 : 5;
+        const maxAttempts = source === 'dropbox_oauth' ? 1 : 3;
+
         await pLimit(prepared, uploadConcurrency, async (item) => {
           let success = false;
-          for (let attempt = 0; attempt < 3 && !success; attempt++) {
+          for (let attempt = 0; attempt < maxAttempts && !success; attempt++) {
             try {
               await streamFileToS3(item.file, item.upload_url, item.correctMime);
               console.log(`[cloud-import] Uploadnut ${item.file.name} → ${item.image_id}`);
               success = true;
             } catch (uploadErr: any) {
               console.error(`[cloud-import] ${item.file.name} pokus ${attempt + 1} selhal: ${uploadErr?.response?.status} ${uploadErr?.message}`);
-              if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+              if (attempt < maxAttempts - 1) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
             }
           }
           if (!success) {
-            console.error(`[cloud-import] ${item.file.name} (${item.image_id}) selhal po 3 pokusech`);
+            console.error(`[cloud-import] ${item.file.name} (${item.image_id}) selhal`);
           }
         });
 
