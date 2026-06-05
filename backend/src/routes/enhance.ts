@@ -89,6 +89,26 @@ async function pLimit<T>(
   await Promise.all(workers);
 }
 
+// ── Dropbox: zjisti namespace pro Team účty ───────────────────────────────────
+// Team Dropbox účty potřebují Dropbox-API-Path-Root header s namespace_id.
+// Tato funkce zjistí namespace z /users/get_current_account a vrátí ho.
+// Pro osobní účty vrátí null.
+async function getDropboxNamespaceId(access_token: string): Promise<string | null> {
+  try {
+    const res = await axios.post(
+      'https://api.dropbox.com/2/users/get_current_account',
+      null,
+      { headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' } }
+    );
+    const namespaceId = res.data?.root_info?.root_namespace_id ?? null;
+    console.log(`[dropbox-namespace] root_namespace_id: ${namespaceId}, root_info tag: ${res.data?.root_info?.['.tag']}`);
+    return namespaceId ? String(namespaceId) : null;
+  } catch (err: any) {
+    console.error(`[dropbox-namespace] Nepodařilo se zjistit namespace: ${err?.message}`);
+    return null;
+  }
+}
+
 // ── Dropbox OAuth: vrať authorization URL ────────────────────────────────────
 router.get('/dropbox-auth-url', (req: Request, res: Response) => {
   if (!DROPBOX_APP_KEY) {
@@ -426,6 +446,68 @@ function parseDropboxError(err: any): string {
   }
 }
 
+// ── Dropbox download helper s automatickým namespace fallback ─────────────────
+// Pro Team Dropbox účty je potřeba Dropbox-API-Path-Root header.
+// Zkusíme nejdřív bez něj, a při 401 zjistíme namespace a zkusíme znovu.
+async function dropboxDownload(
+  access_token: string,
+  dropboxArg: string,
+  filename: string,
+  namespaceId: string | null
+): Promise<Buffer> {
+  const makeHeaders = (nsId: string | null) => {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${access_token}`,
+      'Dropbox-API-Arg': dropboxArg,
+      'Content-Type': '',
+    };
+    if (nsId) {
+      headers['Dropbox-API-Path-Root'] = JSON.stringify({ '.tag': 'namespace_id', 'namespace_id': nsId });
+    }
+    return headers;
+  };
+
+  const doRequest = async (nsId: string | null) => {
+    return axios.post(
+      'https://content.dropboxapi.com/2/files/download',
+      null,
+      {
+        headers: makeHeaders(nsId),
+        responseType: 'arraybuffer',
+        timeout: 10 * 60 * 1000,
+      }
+    );
+  };
+
+  try {
+    // Pokus 1: s namespace (pokud ho už máme) nebo bez
+    const res = await doRequest(namespaceId);
+    return Buffer.from(res.data);
+  } catch (err: any) {
+    if (err?.response?.status === 401 && !namespaceId) {
+      // 401 bez namespace → jsme pravděpodobně Team účet, zjistíme namespace
+      console.log(`[dropbox-download] ${filename} dostал 401, zkouším zjistit Team namespace...`);
+      const nsId = await getDropboxNamespaceId(access_token);
+      if (nsId) {
+        console.log(`[dropbox-download] ${filename} zkouším znovu s namespace ${nsId}`);
+        try {
+          const res2 = await doRequest(nsId);
+          return Buffer.from(res2.data);
+        } catch (err2: any) {
+          const status2 = err2?.response?.status;
+          const body2 = parseDropboxError(err2);
+          console.error(`[dropbox-download] ${filename} CHYBA s namespace HTTP ${status2}: ${body2}`);
+          throw err2;
+        }
+      }
+    }
+    const status = err?.response?.status;
+    const body = parseDropboxError(err);
+    console.error(`[dropbox-download] ${filename} CHYBA HTTP ${status}: ${body}`);
+    throw err;
+  }
+}
+
 // ── Cloud Import ──────────────────────────────────────────────────────────────
 router.post('/cloud-import', async (req: Request, res: Response) => {
   const {
@@ -474,12 +556,11 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
   (async () => {
     try {
-      // ── streamFileToS3 ──────────────────────────────────────────────────────
-      // DŮLEŽITÉ: Pro dropbox_oauth NERETRYUJEME download — každý retry
-      // způsobuje nový Dropbox request se stejným tokenem, který Dropbox odmítne.
-      // Místo toho stáhneme soubor JEDNOU do bufferu a pak uploadujeme.
-      // Retry logika výše (pLimit loop) tedy pro dropbox_oauth nemá smysl
-      // a je nahrazena jednorázovým pokusem s lepším error logem.
+      // Pro Dropbox Team účty: zjistíme namespace jednou pro celý batch
+      // null = osobní účet nebo ještě nezjištěno
+      let dropboxNamespaceId: string | null = null;
+      let namespaceFetched = false;
+
       const streamFileToS3 = async (
         file: { url?: string; id?: string; path_lower?: string; name: string; mimeType?: string; bytes?: number; size?: number },
         upload_url: string,
@@ -493,30 +574,21 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             ? JSON.stringify({ path: file.path_lower })
             : JSON.stringify({ path: `id:${file.id}` });
 
-          console.log(`[dropbox-download] ${file.name} → arg: ${dropboxArg}`);
+          console.log(`[dropbox-download] ${file.name} → arg: ${dropboxArg}${dropboxNamespaceId ? ` (ns: ${dropboxNamespaceId})` : ''}`);
 
-          // ── 1. Stáhneme z Dropboxu ────────────────────────────────────────
+          // Pokud jsme ještě nezjišťovali namespace a nemáme ho, zjistíme ho
+          // proaktivně hned na začátku (vyhne se zbytečnému 401 na prvním souboru)
+          if (!namespaceFetched) {
+            namespaceFetched = true;
+            dropboxNamespaceId = await getDropboxNamespaceId(access_token);
+          }
+
+          // ── 1. Stáhneme z Dropboxu (s automatickým namespace fallback) ────
           let buffer: Buffer;
           try {
-            const sourceResponse = await axios.post(
-              'https://content.dropboxapi.com/2/files/download',
-              null,
-              {
-                headers: {
-                  Authorization: `Bearer ${access_token}`,
-                  'Dropbox-API-Arg': dropboxArg,
-                  'Content-Type': '',
-                },
-                responseType: 'arraybuffer',
-                timeout: 10 * 60 * 1000,
-              }
-            );
-            buffer = Buffer.from(sourceResponse.data);
+            buffer = await dropboxDownload(access_token, dropboxArg, file.name, dropboxNamespaceId);
             console.log(`[dropbox-download] ${file.name} OK — ${buffer.length} bytes`);
           } catch (dropboxErr: any) {
-            const status = dropboxErr?.response?.status;
-            const body = parseDropboxError(dropboxErr);
-            console.error(`[dropbox-download] ${file.name} CHYBA HTTP ${status}: ${body}`);
             throw dropboxErr;
           }
 
@@ -591,8 +663,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
           }
         });
 
-        // Pro dropbox_oauth: bez retry (jeden pokus) — retry způsobuje 401
-        // Pro ostatní zdroje: 3 pokusy jako dřív
         const uploadConcurrency = source === 'dropbox_oauth' ? 3 : 5;
         const maxAttempts = source === 'dropbox_oauth' ? 1 : 3;
 
