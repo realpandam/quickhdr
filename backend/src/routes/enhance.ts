@@ -903,7 +903,7 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
 
     if (!order || !order.user_id) return;
 
-    if (order_id) {
+    if (order_id && order.hdr_order_id) {
       if (order_is_processing) return;
       try {
         const autoenhanceRes = await axios.get(`${API_BASE}/v3/orders/${order_id}`, { headers: { 'x-api-key': API_KEY } });
