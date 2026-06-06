@@ -273,6 +273,7 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
     const user_id = req.body.user_id || null;
     const session_id = req.body.session_id || null;
     const upload_batch_id = req.body.upload_batch_id || null;
+    const upload_batch_total = req.body.upload_batch_total ? parseInt(req.body.upload_batch_total) : null;
     const createResponse = await axios.post(`${API_BASE}/v3/images/`, {
       image_name: file.originalname, image_type: ext, ai_version: '5.x', enhance: true,
       enhance_type: rawSettings.enhance_type ?? 'neutral',
@@ -291,6 +292,7 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
       image_id, filename: file.originalname, payment_status: 'pending',
       amount_czk: PRICE_CZK, user_id: user_id || null, session_id: session_id || null,
       payment_session_id: `pending_${image_id}`, upload_batch_id: upload_batch_id || null,
+      upload_batch_total,
     }).select();
     res.json({ image_id });
   } catch (error) {
@@ -924,8 +926,10 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
 
     if (order.upload_batch_id) {
       const { data: batchOrders } = await supabase
-        .from('orders').select('image_id').eq('upload_batch_id', order.upload_batch_id);
+        .from('orders').select('image_id, upload_batch_total').eq('upload_batch_id', order.upload_batch_id);
       if (batchOrders && batchOrders.length > 1) {
+        const expectedTotal = Math.max(0, ...batchOrders.map((o: any) => o.upload_batch_total ?? 0));
+        if (expectedTotal > 0 && batchOrders.length < expectedTotal) return;
         const statuses = await Promise.allSettled(
           batchOrders.map(async (o) => {
             const r = await axios.get(`${API_BASE}/v3/images/${o.image_id}`, { headers: { 'x-api-key': API_KEY } });
@@ -934,6 +938,13 @@ router.post('/webhook/autoenhance', async (req: Request, res: Response) => {
         );
         const allDone = statuses.every(s => s.status === 'fulfilled' && ['processed', 'failed', 'error'].includes(s.value));
         if (!allDone) return;
+        const { data: claimed } = await supabase
+          .from('orders')
+          .update({ batch_notified: true })
+          .eq('upload_batch_id', order.upload_batch_id)
+          .eq('batch_notified', false)
+          .select('id');
+        if (!claimed || claimed.length === 0) return;
         try {
           const { data: userData } = await supabase.auth.admin.getUserById(order.user_id);
           if (userData?.user?.email) {

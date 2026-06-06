@@ -20,6 +20,7 @@ interface PhotoItem {
   error: string | null;
   hdr_group_id?: string;
   upload_batch_id?: string;
+  upload_batch_total?: number;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -140,6 +141,7 @@ export default function ImageUploader() {
       formData.append('session_id', sessionId);
       if (user) formData.append('user_id', user.id);
       if (item.upload_batch_id) formData.append('upload_batch_id', item.upload_batch_id);
+      if (item.upload_batch_total) formData.append('upload_batch_total', String(item.upload_batch_total));
 
       const uploadRes = await fetch(`${API_URL}/api/enhance/upload`, {
         method: 'POST',
@@ -408,6 +410,7 @@ export default function ImageUploader() {
         progress: 0, error: null,
         hdr_group_id: undefined,
         upload_batch_id: batchId,
+        upload_batch_total: validFiles.length,
       }));
 
       setPhotos(prev => [...prev, ...validItems, ...invalidItems]);
