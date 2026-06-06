@@ -406,12 +406,13 @@ export default function DashboardPage() {
   }
 
   const filterBtnStyle = (active: boolean) => ({
-    padding: '8px 18px', fontSize: 13, fontWeight: 600, borderRadius: 8,
+    padding: '8px 14px', fontSize: 13, fontWeight: 600, borderRadius: 8,
     border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
     background: active ? 'rgba(var(--accent-rgb, 100,200,255), 0.12)' : 'var(--bg-secondary)',
     color: active ? 'var(--accent)' : 'var(--text-muted)',
     cursor: 'pointer', transition: 'all 0.2s ease', fontFamily: 'inherit',
     boxShadow: active ? '0 0 12px rgba(var(--accent-rgb, 100,200,255), 0.25)' : 'none',
+    whiteSpace: 'nowrap' as const,
   } as React.CSSProperties);
 
   const currentLightboxOrder = lightbox ? lightbox.orders[lightbox.index] : null;
@@ -420,18 +421,22 @@ export default function DashboardPage() {
     <main style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <Header />
 
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: 'clamp(2.5rem, 5vw, 3.5rem) clamp(1.5rem, 4vw, 2.5rem)' }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: 'clamp(2rem, 5vw, 3.5rem) clamp(1rem, 4vw, 2.5rem)' }}>
 
-        <div style={{ marginBottom: '3rem' }}>
-          <h1 style={{ fontSize: 'clamp(2.2rem, 6vw, 3rem)', fontWeight: 900, letterSpacing: '-0.03em', color: 'var(--text-primary)', marginBottom: '0.75rem' }}>
+        {/* ── Nadpis ── */}
+        <div style={{ marginBottom: '2rem' }}>
+          <h1 style={{ fontSize: 'clamp(1.8rem, 6vw, 3rem)', fontWeight: 900, letterSpacing: '-0.03em', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
             Vaše fotografie
           </h1>
-          <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
+          <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
             {allGroups.length} {allGroups.length === 1 ? 'skupina' : allGroups.length < 5 ? 'skupiny' : 'skupin'} · {totalPhotos} fotek
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem', marginBottom: '2.5rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* ── Toolbar ── */}
+        <div className="dashboard-toolbar" style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.75rem', flexDirection: 'column' }}>
+
+          {/* Řádek 1: Nahrát + Smazat vypršené */}
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' as const, alignItems: 'center' }}>
             <a href="/#editor" style={{
               display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
@@ -440,6 +445,7 @@ export default function DashboardPage() {
               fontWeight: 700, transition: 'all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
               textDecoration: 'none', fontFamily: 'inherit',
               boxShadow: '0 8px 24px rgba(var(--accent-rgb, 100, 200, 255), 0.3)',
+              whiteSpace: 'nowrap' as const,
             }}
               onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-4px)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 14px 36px rgba(var(--accent-rgb, 100, 200, 255), 0.45)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 8px 24px rgba(var(--accent-rgb, 100, 200, 255), 0.3)'; }}
@@ -448,9 +454,10 @@ export default function DashboardPage() {
             </a>
             {expiredCount > 0 && (
               <button onClick={handleDeleteExpired} style={{
-                padding: '10px 20px', background: 'transparent', color: '#ef4444',
+                padding: '10px 16px', background: 'transparent', color: '#ef4444',
                 border: '1px solid rgba(239,68,68,0.4)', borderRadius: 8, cursor: 'pointer',
                 fontSize: 13, fontWeight: 600, transition: 'all 0.2s ease', fontFamily: 'inherit',
+                whiteSpace: 'nowrap' as const,
               }}
                 onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.08)'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
@@ -460,9 +467,11 @@ export default function DashboardPage() {
             )}
           </div>
 
+          {/* Řádek 2: Search + Filtry + Sort — na mobilu pod sebou */}
           {orders.length > 0 && (
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' as const }}>
-              <div style={{ position: 'relative' }}>
+            <div className="search-filter-row" style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' as const }}>
+              {/* Search */}
+              <div style={{ position: 'relative', flex: '1 1 160px', minWidth: 140, maxWidth: 260 }}>
                 <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: 'var(--text-muted)', pointerEvents: 'none', opacity: search ? 0 : 1 }}>🔍</span>
                 <input type="text" placeholder={search ? '' : placeholderText} value={search}
                   onChange={e => setSearch(e.target.value)}
@@ -471,23 +480,28 @@ export default function DashboardPage() {
                     padding: '9px 14px 9px 34px', background: 'var(--bg-secondary)',
                     border: `1px solid ${searchFocused || search ? 'var(--accent)' : 'var(--border)'}`,
                     borderRadius: 8, color: 'var(--text-primary)', fontSize: 13,
-                    fontFamily: 'inherit', width: 200, transition: 'all 0.25s ease', outline: 'none',
+                    fontFamily: 'inherit', width: '100%', transition: 'all 0.25s ease', outline: 'none',
                     boxShadow: searchFocused || search ? '0 0 0 3px rgba(var(--accent-rgb, 100,200,255), 0.12)' : 'none',
+                    boxSizing: 'border-box' as const,
                   }} />
               </div>
-              <div style={{ display: 'flex', gap: '0.4rem', background: 'var(--bg-secondary)', padding: '4px', borderRadius: 10, border: '1px solid var(--border)' }}>
+
+              {/* Filter tlačítka */}
+              <div style={{ display: 'flex', gap: '0.3rem', background: 'var(--bg-secondary)', padding: '4px', borderRadius: 10, border: '1px solid var(--border)', flexShrink: 0 }}>
                 {(['all', 'paid', 'pending'] as const).map(f => (
                   <button key={f} onClick={() => setFilter(f)} style={filterBtnStyle(filter === f)}>
-                    {f === 'all' ? 'Vše' : f === 'paid' ? '✓ Zaplacené' : '⏳ Čekající'}
+                    {f === 'all' ? 'Vše' : f === 'paid' ? '✓ Zap.' : '⏳ Ček.'}
                   </button>
                 ))}
               </div>
-              <div style={{ position: 'relative' }}>
+
+              {/* Sort */}
+              <div style={{ position: 'relative', flexShrink: 0 }}>
                 <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, pointerEvents: 'none', color: 'var(--text-muted)' }}>
                   {sort === 'newest' ? '↓' : sort === 'oldest' ? '↑' : sort === 'az' ? 'A' : 'Z'}
                 </span>
                 <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} style={{
-                  padding: '9px 32px 9px 28px', background: 'var(--bg-secondary)',
+                  padding: '9px 28px 9px 28px', background: 'var(--bg-secondary)',
                   border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)',
                   fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', outline: 'none', appearance: 'none',
                 }}
@@ -499,51 +513,53 @@ export default function DashboardPage() {
                   <option value="az">A → Z</option>
                   <option value="za">Z → A</option>
                 </select>
-                <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 10, pointerEvents: 'none', color: 'var(--text-muted)' }}>▼</span>
+                <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, pointerEvents: 'none', color: 'var(--text-muted)' }}>▼</span>
               </div>
             </div>
           )}
         </div>
 
-        {/* Multiselect action bar */}
+        {/* ── Multiselect action bar ── */}
         <div style={{
-          overflow: 'hidden', maxHeight: hasSelection ? 80 : 0, opacity: hasSelection ? 1 : 0,
+          overflow: 'hidden', maxHeight: hasSelection ? 100 : 0, opacity: hasSelection ? 1 : 0,
           transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.25s ease',
-          marginBottom: hasSelection ? '1.25rem' : 0,
+          marginBottom: hasSelection ? '1rem' : 0,
         }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-            padding: '12px 18px', borderRadius: 10,
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            padding: '10px 14px', borderRadius: 10,
             background: 'rgba(123,92,240,0.08)', border: '1px solid rgba(123,92,240,0.25)',
           }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
               {selectedOrders.size} {selectedOrders.size === 1 ? 'fotografie' : selectedOrders.size < 5 ? 'fotografie' : 'fotografií'} vybrány
               {selectedPending.length > 0 && ` · ${selectedPending.reduce((s, o) => s + (o.amount_czk ?? 25), 0)} Kč`}
             </span>
             {selectedPaid.length > 0 && (
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                {selectedPaid.length} zaplaceno — klikni na fotku ke stažení
+                {selectedPaid.length} zaplaceno
               </span>
             )}
             {selectedPending.length > 0 && (
               <button onClick={handleBuySelected} disabled={checkoutLoading} style={{
-                padding: '8px 20px', background: 'var(--accent)', color: '#000',
+                padding: '8px 16px', background: 'var(--accent)', color: '#000',
                 border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13,
                 fontWeight: 700, fontFamily: 'inherit', opacity: checkoutLoading ? 0.6 : 1,
+                whiteSpace: 'nowrap' as const,
               }}>
                 {checkoutLoading ? 'Načítám…' : `Koupit ${selectedPending.length > 1 ? `${selectedPending.length} fotek` : 'fotku'}`}
               </button>
             )}
             <button onClick={() => setSelectedOrders(new Set())} style={{
-              padding: '8px 14px', background: 'transparent', color: 'var(--text-muted)',
+              padding: '8px 12px', background: 'transparent', color: 'var(--text-muted)',
               border: '1px solid var(--border)', borderRadius: 7, cursor: 'pointer',
-              fontSize: 13, fontFamily: 'inherit',
+              fontSize: 13, fontFamily: 'inherit', whiteSpace: 'nowrap' as const,
             }}>
-              Zrušit výběr
+              Zrušit
             </button>
           </div>
         </div>
 
+        {/* ── Prázdné stavy ── */}
         {orders.length === 0 ? (
           <div style={{ textAlign: 'center' as const, padding: '4rem 2rem' }}>
             <div style={{ fontSize: 64, marginBottom: '1.5rem', opacity: 0.5 }}>📷</div>
@@ -584,27 +600,27 @@ export default function DashboardPage() {
                     background: 'var(--bg-card)', overflow: 'hidden',
                     animation: `slideUp 0.4s cubic-bezier(0.34,1.56,0.64,1) ${gIdx * 0.05}s both`,
                     transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
-                    // Vizuální zašednutí při zpracování, ale interakce povoleny
                     opacity: groupProcessing ? 0.75 : 1,
                   }}>
 
-                    {/* Batch header */}
+                    {/* ── Batch header ── */}
                     <div
                       onClick={() => !isEditing && !groupProcessing && toggleBatch(group.batch_id)}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        padding: '13px 16px',
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '12px 14px',
                         cursor: isEditing || groupProcessing ? 'default' : 'pointer',
                         borderBottom: isOpen ? '1px solid var(--border)' : 'none',
                         background: batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)',
                         transition: 'background 0.2s',
                         opacity: batchExpired ? 0.75 : 1,
                         userSelect: 'none' as const,
+                        minWidth: 0,
                       }}
                       onMouseEnter={e => { if (!isEditing && !groupProcessing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.06)' : 'var(--bg-secondary)'; }}
                       onMouseLeave={e => { if (!isEditing && !groupProcessing) (e.currentTarget as HTMLDivElement).style.background = batchExpired ? 'rgba(239,68,68,0.03)' : 'var(--bg-card)'; }}
                     >
-                      {/* Select all — skryj při zpracování */}
+                      {/* Checkbox */}
                       {!batchExpired && !groupProcessing && selectableOrders.length > 0 && (
                         <div
                           onClick={e => toggleSelectAll(group, e)}
@@ -621,17 +637,19 @@ export default function DashboardPage() {
                         </div>
                       )}
 
+                      {/* Ikona */}
                       <div style={{
-                        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                        width: 34, height: 34, borderRadius: 8, flexShrink: 0,
                         background: batchExpired ? 'rgba(239,68,68,0.12)' : groupProcessing ? 'rgba(123,92,240,0.08)' : 'rgba(123,92,240,0.12)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
                       }}>
                         {batchExpired ? '⏰' : groupProcessing ? (
                           <div style={{ width: 16, height: 16, border: '2px solid var(--border)', borderTop: '2px solid var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
                         ) : isSingle ? '🖼️' : '📁'}
                       </div>
 
-                      <div style={{ flex: 1, minWidth: 0 }}>
+                      {/* Název + datum — FIX: minWidth:0 + nowrap na subtitle */}
+                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                         {isEditing && !groupProcessing ? (
                           <input
                             ref={renameInputRef}
@@ -649,21 +667,24 @@ export default function DashboardPage() {
                               border: '1.5px solid var(--accent)', borderRadius: 6,
                               padding: '4px 8px', outline: 'none', fontFamily: 'inherit',
                               boxShadow: '0 0 0 3px rgba(123,92,240,0.15)',
+                              boxSizing: 'border-box' as const,
                             }}
                             placeholder="Název skupiny…"
                             maxLength={80}
                           />
                         ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'hidden' }}>
                             <p
                               onClick={e => !batchExpired && !groupProcessing && startRename(group, e)}
-                              title={batchExpired || groupProcessing ? undefined : 'Klikněte pro přejmenování'}
+                              title={group.name}
                               style={{
                                 fontSize: 14, fontWeight: 600, color: 'var(--text-primary)',
-                                margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                margin: 0,
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                 cursor: batchExpired || groupProcessing ? 'default' : 'text',
                                 padding: '4px 6px', borderRadius: 5, marginLeft: -6,
                                 transition: 'background 0.15s ease',
+                                minWidth: 0, flex: 1,
                               }}
                               onMouseEnter={e => { if (!batchExpired && !groupProcessing) (e.currentTarget as HTMLParagraphElement).style.background = 'var(--bg-secondary)'; }}
                               onMouseLeave={e => { (e.currentTarget as HTMLParagraphElement).style.background = 'transparent'; }}
@@ -674,6 +695,7 @@ export default function DashboardPage() {
                               <span
                                 onClick={e => startRename(group, e)}
                                 title="Přejmenovat"
+                                className="rename-icon"
                                 style={{ fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', opacity: 0.5, flexShrink: 0, transition: 'opacity 0.15s' }}
                                 onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.opacity = '1'; }}
                                 onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.opacity = '0.5'; }}
@@ -683,36 +705,41 @@ export default function DashboardPage() {
                             )}
                           </div>
                         )}
-                        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                        {/* FIX: subtitle — nowrap, ellipsis */}
+                        <p style={{
+                          fontSize: 12, color: 'var(--text-muted)', margin: '1px 0 0',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}>
                           {new Date(group.created_at).toLocaleDateString('cs-CZ')}
                           {groupProcessing && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>· Zpracovává se…</span>}
-                          {!groupProcessing && countdown && !batchExpired && ` · Vyprší za ${countdown}`}
+                          {!groupProcessing && countdown && !batchExpired && <span> · Vyprší za {countdown}</span>}
                           {batchExpired && <span style={{ color: '#ef4444' }}> · Vypršelo</span>}
                         </p>
                       </div>
 
-                      {/* Badges + delete — delete vždy viditelný */}
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                      {/* Badges + delete — FIX: omezenámax šířka, wrap */}
+                      <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0, flexWrap: 'nowrap' as const }}>
                         {groupProcessing ? (
-                          <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(123,92,240,0.12)', color: 'var(--accent)' }}>
+                          <span className="badge-processing" style={{ padding: '3px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(123,92,240,0.12)', color: 'var(--accent)', whiteSpace: 'nowrap' as const }}>
                             ⏳ Zpracovává se
                           </span>
                         ) : batchExpired ? (
-                          <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(239,68,68,0.12)', color: '#ef4444' }}>Vypršelo</span>
+                          <span style={{ padding: '3px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(239,68,68,0.12)', color: '#ef4444', whiteSpace: 'nowrap' as const }}>Vypršelo</span>
                         ) : allPaid ? (
-                          <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(74,222,128,0.12)', color: '#4ade80' }}>✓ Zaplaceno</span>
+                          <span style={{ padding: '3px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(74,222,128,0.12)', color: '#4ade80', whiteSpace: 'nowrap' as const }}>✓ Zap.</span>
                         ) : (
                           <>
-                            {group.paidCount > 0 && <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(74,222,128,0.12)', color: '#4ade80' }}>✓ {group.paidCount}</span>}
-                            <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>⏳ {group.totalCount - group.paidCount} ke koupi</span>
+                            {group.paidCount > 0 && <span style={{ padding: '3px 7px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(74,222,128,0.12)', color: '#4ade80', whiteSpace: 'nowrap' as const }}>✓ {group.paidCount}</span>}
+                            <span style={{ padding: '3px 7px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(251,146,60,0.12)', color: '#fb923c', whiteSpace: 'nowrap' as const }}>⏳ {group.totalCount - group.paidCount}</span>
                           </>
                         )}
+                        {/* Počet fotek — skrýt na úzkých mobilech pokud není dost místa */}
                         {!isSingle && (
-                          <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
-                            {group.totalCount} fotek
+                          <span className="badge-count" style={{ padding: '3px 7px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)', whiteSpace: 'nowrap' as const }}>
+                            {group.totalCount}
                           </span>
                         )}
-                        {/* 🗑 delete — vždy viditelný, s confirmation dialogem */}
+                        {/* Delete */}
                         <button
                           onClick={e => { e.stopPropagation(); handleDeleteBatch(group.orders); }}
                           title="Smazat skupinu"
@@ -720,31 +747,30 @@ export default function DashboardPage() {
                             width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
                             background: 'transparent', border: '1px solid transparent', borderRadius: 6,
                             color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, transition: 'all 0.15s ease',
+                            flexShrink: 0,
                           }}
                           onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.1)'; (e.currentTarget as HTMLButtonElement).style.color = '#ef4444'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.3)'; }}
                           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent'; }}
                         >
                           🗑
                         </button>
-                        <span style={{ fontSize: 15, color: 'var(--text-muted)', transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block', marginLeft: 2 }}>
+                        <span style={{ fontSize: 14, color: 'var(--text-muted)', transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block', flexShrink: 0 }}>
                           ▾
                         </span>
                       </div>
                     </div>
 
-                    {/* Expanded content */}
+                    {/* ── Expanded content ── */}
                     <div style={{
                       display: 'grid',
                       gridTemplateRows: isOpen ? '1fr' : '0fr',
                       transition: 'grid-template-rows 0.35s cubic-bezier(0.4,0,0.2,1)',
                     }}>
                       <div style={{ overflow: 'hidden' }}>
-                        {/* Overlay při zpracování */}
                         {groupProcessing && isOpen && (
                           <div style={{
                             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                            gap: 12, padding: '2.5rem 1rem',
-                            background: 'var(--bg-card)',
+                            gap: 12, padding: '2.5rem 1rem', background: 'var(--bg-card)',
                           }}>
                             <div style={{
                               width: 36, height: 36, border: '3px solid var(--border)',
@@ -758,10 +784,9 @@ export default function DashboardPage() {
                           </div>
                         )}
 
-                        {/* Fotky — zobrazí se jen pokud není zpracování */}
                         {!groupProcessing && (
                           <>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1px', background: 'var(--border)' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '1px', background: 'var(--border)' }}>
                               {group.orders.map((order, oIdx) => {
                                 const expired = new Date(order.expires_at) < new Date();
                                 const isPaid = order.payment_status === 'paid';
@@ -776,7 +801,6 @@ export default function DashboardPage() {
                                     animation: isOpen ? `fadeInPhoto 0.3s ease ${oIdx * 0.03}s both` : 'none',
                                     position: 'relative' as const,
                                   }}>
-                                    {/* Checkbox — jen pro hotové nezaplacené */}
                                     {!expired && isPaid === false && photoReady && (
                                       <div
                                         onClick={e => toggleOrder(order.id, e)}
@@ -850,7 +874,6 @@ export default function DashboardPage() {
                                           )}
                                         </div>
                                       ) : !expired && photoReady ? (
-                                        // Koupit — JEDINÉ co je disabled při zpracování skupiny
                                         <button
                                           onClick={() => handleBuy(order)}
                                           disabled={groupProcessing}
@@ -877,7 +900,7 @@ export default function DashboardPage() {
                               })}
                             </div>
 
-                            <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                            <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                                 {group.paidCount} z {group.totalCount} zaplaceno · {group.orders.reduce((s, o) => s + (o.amount_czk || 0), 0)} Kč celkem
                               </span>
@@ -922,7 +945,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Potvrzovací dialog */}
+      {/* ── Potvrzovací dialog ── */}
       {confirmDialog && (
         <div
           onClick={() => setConfirmDialog(null)}
@@ -930,7 +953,7 @@ export default function DashboardPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: '1.75rem 2rem', width: 360, maxWidth: '90vw', boxShadow: '0 30px 80px rgba(0,0,0,0.5)', animation: 'zoomIn 0.2s cubic-bezier(0.34,1.56,0.64,1)' }}
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: '1.75rem 1.5rem', width: 340, maxWidth: '90vw', boxShadow: '0 30px 80px rgba(0,0,0,0.5)', animation: 'zoomIn 0.2s cubic-bezier(0.34,1.56,0.64,1)' }}
           >
             <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(239,68,68,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, marginBottom: '1rem' }}>
               🗑
@@ -959,7 +982,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Lightbox */}
+      {/* ── Lightbox ── */}
       {lightbox && currentLightboxOrder && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.96)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(10px)', animation: 'fadeIn 0.2s ease' }}
@@ -967,7 +990,7 @@ export default function DashboardPage() {
         >
           {lightbox.index > 0 && (
             <button onClick={e => { e.stopPropagation(); setLightbox(prev => prev ? { ...prev, index: prev.index - 1 } : prev); }}
-              style={{ position: 'fixed', left: 20, top: '50%', transform: 'translateY(-50%)', width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
+              style={{ position: 'fixed', left: 12, top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 20, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.2)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)'; }}
             >←</button>
@@ -978,7 +1001,7 @@ export default function DashboardPage() {
               alt={currentLightboxOrder.filename}
               style={{ maxWidth: '85vw', maxHeight: '82vh', objectFit: 'contain', borderRadius: 10, boxShadow: '0 25px 60px rgba(0,0,0,0.5)', animation: 'zoomIn 0.25s cubic-bezier(0.34,1.56,0.64,1)' }}
             />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
               <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>
                 {lightbox.index + 1} / {lightbox.orders.length} · {currentLightboxOrder.filename && !currentLightboxOrder.filename.match(/^[0-9a-f-]{36}/) ? currentLightboxOrder.filename : 'Bez názvu'}
               </span>
@@ -1003,13 +1026,13 @@ export default function DashboardPage() {
           </div>
           {lightbox.index < lightbox.orders.length - 1 && (
             <button onClick={e => { e.stopPropagation(); setLightbox(prev => prev ? { ...prev, index: prev.index + 1 } : prev); }}
-              style={{ position: 'fixed', right: 20, top: '50%', transform: 'translateY(-50%)', width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
+              style={{ position: 'fixed', right: 12, top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 20, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.2)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)'; }}
             >→</button>
           )}
           <button onClick={() => setLightbox(null)}
-            style={{ position: 'fixed', top: 24, right: 28, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 22, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
+            style={{ position: 'fixed', top: 16, right: 16, width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50%', color: '#fff', fontSize: 20, cursor: 'pointer', backdropFilter: 'blur(8px)' }}
             onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.22)'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.12)'; }}
           >✕</button>
@@ -1023,7 +1046,26 @@ export default function DashboardPage() {
         @keyframes fadeInPhoto { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .batch-card:hover { box-shadow: 0 4px 24px rgba(0,0,0,0.1); }
-        @media (max-width: 768px) { div[style*="minmax(180px"] { grid-template-columns: repeat(2, 1fr) !important; } }
+
+        /* ── MOBILNÍ OPRAVY ── */
+        @media (max-width: 640px) {
+          /* Fotky grid — 2 sloupce */
+          div[style*="minmax(160px"] { grid-template-columns: repeat(2, 1fr) !important; }
+
+          /* Badge "Zpracovává se" — zkrátit */
+          .badge-processing { display: none !important; }
+
+          /* Badge počtu fotek — skrýt na nejmenších obrazovkách */
+          .badge-count { display: none !important; }
+
+          /* Rename ikona — skrýt na mobilu (rename přes long-press nebo tap na název) */
+          .rename-icon { display: none !important; }
+        }
+
+        @media (max-width: 400px) {
+          /* Extra malé mobily — menší padding v batch header */
+          .batch-card > div:first-child { padding: 10px 10px !important; gap: 8px !important; }
+        }
       `}</style>
     </main>
   );
