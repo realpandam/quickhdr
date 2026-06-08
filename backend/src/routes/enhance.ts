@@ -105,7 +105,7 @@ function buildRestage(rawSettings: any): Record<string, string> | undefined {
 function buildEnhanceParams(rawSettings: any): Record<string, unknown> {
   //const restage = buildRestage(rawSettings);
   return {
-    ai_version: 'latest',
+    ai_version: 'stable',
     enhance: true,
     enhance_type: rawSettings.enhance_type ?? 'neutral',
     sky_replacement: rawSettings.sky_replacement ?? true,

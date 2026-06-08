@@ -97,7 +97,12 @@ export default function ImageUploader() {
   useEffect(() => {
     const saved = sessionStorage.getItem('pending_settings');
     if (saved) {
-      try { setSettings(JSON.parse(saved)); } catch { }
+      try {
+        const parsed = JSON.parse(saved);
+        // Odstraň restage pokud existuje ze starého stavu
+        delete parsed.restage;
+        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+      } catch { }
     }
   }, []);
 
