@@ -96,6 +96,11 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
     const [sortDir, setSortDir] = useState<SortDir>('asc');
     const [showOnlyImages, setShowOnlyImages] = useState(false);
 
+    const hdrModeRef = useRef(hdrMode);
+    const settingsRef = useRef(settings);
+    useEffect(() => { hdrModeRef.current = hdrMode; }, [hdrMode]);
+    useEffect(() => { settingsRef.current = settings; }, [settings]);
+
     const openDropboxOAuth = useCallback(async () => {
         try {
             setDropboxAuthState('authenticating');
@@ -314,7 +319,9 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
             const session_id = sessionStorage.getItem('fasthdr_session_id') ?? undefined;
 
             const body: Record<string, unknown> = {
-                source, files, settings: settings ?? {}, hdr_mode: hdrMode,
+                source, files,
+                settings: settingsRef.current ?? {},
+                hdr_mode: hdrModeRef.current,
                 user_id: user?.id ?? null, session_id: session_id ?? null,
             };
             if (token) body.access_token = token;
@@ -349,7 +356,7 @@ export default function CloudPicker({ onFiles, settings, hdrMode = false }: Prop
             setErrorMsg(err instanceof Error ? err.message : 'Nepodařilo se odeslat soubory');
             setCloudState('error');
         }
-    }, [settings, hdrMode]);
+    }, []);
 
     const showPicker = useCallback((token: string) => {
         window.gapi.load('picker', () => {
