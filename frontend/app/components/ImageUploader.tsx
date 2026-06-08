@@ -34,12 +34,12 @@ const DEFAULT_SETTINGS: Settings = {
   privacy: false,
   hdr_mode: false,
   hdr_brackets: 'auto',
-  restage: {
-    tvs: null,
-    fire_in_fireplaces: null,
-    photographer: null,
-    grass: null,
-  },
+  // restage: {
+  //   tvs: null,
+  //   fire_in_fireplaces: null,
+  //   photographer: null,
+  //   grass: null,
+  // },
 };
 
 const HDR_GROUP_CONCURRENCY = 3;

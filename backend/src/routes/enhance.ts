@@ -103,7 +103,7 @@ function buildRestage(rawSettings: any): Record<string, string> | undefined {
 
 // ── Helper: sestav společné enhancement parametry ─────────────────────────────
 function buildEnhanceParams(rawSettings: any): Record<string, unknown> {
-  const restage = buildRestage(rawSettings);
+  //const restage = buildRestage(rawSettings);
   return {
     ai_version: 'latest',
     enhance: true,
@@ -115,7 +115,7 @@ function buildEnhanceParams(rawSettings: any): Record<string, unknown> {
     window_pull_style: rawSettings.window_pull_style ?? 'WINDOWS_WITH_SKIES',
     upscale: rawSettings.upscale ?? false,
     auto_privacy: rawSettings.privacy ?? false,  // ← bylo: privacy
-    ...(restage && { restage }),
+    //...(restage && { restage }),
   };
 }
 // ── Dropbox: zjisti namespace pro Team účty ───────────────────────────────────

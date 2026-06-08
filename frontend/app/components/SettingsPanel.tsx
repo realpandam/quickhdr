@@ -20,7 +20,7 @@ interface Settings {
   privacy: boolean;
   hdr_mode: boolean;
   hdr_brackets: 'auto' | 3 | 5 | 7;
-  restage: Restage;
+  // restage: Restage;
 }
 
 interface Props {
@@ -57,9 +57,9 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     onChange({ ...settings, [key]: value });
   };
-  const setRestage = <K extends keyof Restage>(key: K, value: Restage[K]) => {
-    onChange({ ...settings, restage: { ...settings.restage, [key]: value } });
-  };
+  // const setRestage = <K extends keyof Restage>(key: K, value: Restage[K]) => {
+  //   onChange({ ...settings, restage: { ...settings.restage, [key]: value } });
+  // };
 
   return (
     <div style={{ position: 'relative' as const, marginBottom: '1.5rem' }}>
@@ -137,25 +137,23 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
           <div style={{
             gridColumn: '1 / -1',
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, minmax(0, max-content))',
+            gridTemplateColumns: 'repeat(2, minmax(0, max-content))',  // ← bylo repeat(4,...)
             gap: '0.85rem 2.5rem',
             marginTop: '0.75rem',
           }} className="settings-toggles">
 
             <Toggle on={settings.sky_replacement} onToggle={() => set('sky_replacement', !settings.sky_replacement)} label="Výměna oblohy" />
             <Toggle on={settings.upscale} onToggle={() => set('upscale', !settings.upscale)} label="Zvýšení rozlišení" />
-            <Toggle on={settings.restage.tvs === 'BLACK_OUT'} onToggle={() => setRestage('tvs', settings.restage.tvs === 'BLACK_OUT' ? null : 'BLACK_OUT')} label="Zčernání TV obrazovek" />
-            <Toggle on={settings.restage.fire_in_fireplaces === 'ALIGHT'} onToggle={() => setRestage('fire_in_fireplaces', settings.restage.fire_in_fireplaces === 'ALIGHT' ? null : 'ALIGHT')} label="Oheň v krbu" />
+            {/* <Toggle on={settings.restage.tvs === 'BLACK_OUT'} onToggle={() => setRestage('tvs', settings.restage.tvs === 'BLACK_OUT' ? null : 'BLACK_OUT')} label="Zčernání TV obrazovek" />
+                <Toggle on={settings.restage.fire_in_fireplaces === 'ALIGHT'} onToggle={() => setRestage('fire_in_fireplaces', settings.restage.fire_in_fireplaces === 'ALIGHT' ? null : 'ALIGHT')} label="Oheň v krbu" /> */}
 
             <Toggle on={settings.vertical_correction} onToggle={() => set('vertical_correction', !settings.vertical_correction)} label="Srovnání linií" />
             <Toggle on={settings.privacy} onToggle={() => set('privacy', !settings.privacy)} label="Anonymizace obličejů a SPZ" />
-            <Toggle on={settings.restage.photographer === 'REMOVE'} onToggle={() => setRestage('photographer', settings.restage.photographer === 'REMOVE' ? null : 'REMOVE')} label="Odstranění fotografa z odrazů" />
-            <Toggle on={settings.restage.grass === 'GREEN'} onToggle={() => setRestage('grass', settings.restage.grass === 'GREEN' ? null : 'GREEN')} label="Zelenější trávník" />
+            {/* <Toggle on={settings.restage.photographer === 'REMOVE'} onToggle={() => setRestage('photographer', settings.restage.photographer === 'REMOVE' ? null : 'REMOVE')} label="Odstranění fotografa z odrazů" />
+                <Toggle on={settings.restage.grass === 'GREEN'} onToggle={() => setRestage('grass', settings.restage.grass === 'GREEN' ? null : 'GREEN')} label="Zelenější trávník" /> */}
 
             <Toggle on={settings.lens_correction} onToggle={() => set('lens_correction', !settings.lens_correction)} label="Korekce objektivu" />
-            <div />
-            <div />
-            <div />
+            {/* prázdné divy smazány */}
 
           </div>
 

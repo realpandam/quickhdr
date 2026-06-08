@@ -8,9 +8,9 @@ interface Example {
 
 const EXAMPLES: Example[] = [
   {
-    title: 'Černá obrazovka TV — odstranění nežádoucích prvků', tag: 'Interiér',
-    settings: ['Odstranění objektů', 'Neutrální tón'],
-    before: '/examples/cerna-obrazovka-tv-before.webp', after: '/examples/cerna-obrazovka-tv-after.webp',
+    title: 'HDR režim — spojení více expozic', tag: 'Interiér',
+    settings: ['Neutrální tón'],
+    before: '/examples/hdr-before.webp', after: '/examples/hdr-after.webp',
   },
   {
     title: 'Čistý výhled z oken — vytažení oken', tag: 'Interiér',
@@ -23,19 +23,19 @@ const EXAMPLES: Example[] = [
     before: '/examples/odstraneni-zkresleni-before.webp', after: '/examples/odstraneni-zkresleni-after.webp',
   },
   {
+    title: 'HDR režim — spojení více expozic', tag: 'Exteriér',
+    settings: ['Neutrální tón'],
+    before: '/examples/hdr-out-before.webp', after: '/examples/hdr-out-after.webp',
+  },
+  {
     title: 'Srovnání linií — korekce perspektivy', tag: 'Exteriér',
     settings: ['Korekce vertikály', 'Korekce objektivu'],
     before: '/examples/srovnani-linii-before.webp', after: '/examples/srovnani-linii-after.webp',
   },
   {
     title: 'Výměna oblohy — dramatická obloha', tag: 'Exteriér',
-    settings: ['Výměna oblohy', 'Moderní tón'],
+    settings: ['Výměna oblohy', 'Teplý tón'],
     before: '/examples/vymena-oblohy-before.webp', after: '/examples/vymena-oblohy-after.webp',
-  },
-  {
-    title: 'Zelenější trávník — úprava barev', tag: 'Exteriér',
-    settings: ['Teplý tón', 'Neutrální tón'],
-    before: '/examples/zelenejsi-travnik-before.webp', after: '/examples/zelenejsi-travnik-after.webp',
   },
 ];
 
