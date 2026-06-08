@@ -29,11 +29,17 @@ const DEFAULT_SETTINGS: Settings = {
   cloud_type: 'LOW_CLOUD',
   vertical_correction: true,
   lens_correction: true,
-  window_pull_type: 'WINDOWS_WITH_SKIES',
+  window_pull_style: 'WINDOWS_WITH_SKIES',
   upscale: false,
   privacy: false,
   hdr_mode: false,
   hdr_brackets: 'auto',
+  restage: {
+    tvs: null,
+    fire_in_fireplaces: null,
+    photographer: null,
+    grass: null,
+  },
 };
 
 const HDR_GROUP_CONCURRENCY = 3;

@@ -89,10 +89,37 @@ async function pLimit<T>(
   await Promise.all(workers);
 }
 
+// ── Helper: sestav restage objekt ─────────────────────────────────────────────
+// Posílá pouze klíče které jsou aktivní (ne null).
+function buildRestage(rawSettings: any): Record<string, string> | undefined {
+  const restage = rawSettings.restage ?? {};
+  const result: Record<string, string> = {};
+  if (restage.tvs) result.tvs = restage.tvs;
+  if (restage.fire_in_fireplaces) result.fire_in_fireplaces = restage.fire_in_fireplaces;
+  if (restage.photographer) result.photographer = restage.photographer;
+  if (restage.grass) result.grass = restage.grass;
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+// ── Helper: sestav společné enhancement parametry ─────────────────────────────
+function buildEnhanceParams(rawSettings: any): Record<string, unknown> {
+  const restage = buildRestage(rawSettings);
+  return {
+    ai_version: '5.x',
+    enhance: true,
+    enhance_type: rawSettings.enhance_type ?? 'neutral',
+    sky_replacement: rawSettings.sky_replacement ?? true,
+    cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
+    vertical_correction: rawSettings.vertical_correction ?? true,
+    lens_correction: rawSettings.lens_correction ?? true,
+    window_pull_style: rawSettings.window_pull_style ?? 'WINDOWS_WITH_SKIES',
+    upscale: rawSettings.upscale ?? false,
+    privacy: rawSettings.privacy ?? false,
+    ...(restage && { restage }),
+  };
+}
+
 // ── Dropbox: zjisti namespace pro Team účty ───────────────────────────────────
-// Team Dropbox účty potřebují Dropbox-API-Path-Root header s namespace_id.
-// Tato funkce zjistí namespace z /users/get_current_account a vrátí ho.
-// Pro osobní účty vrátí null.
 async function getDropboxNamespaceId(access_token: string): Promise<string | null> {
   try {
     const res = await axios.post(
@@ -200,7 +227,6 @@ router.post('/dropbox-list', async (req: Request, res: Response) => {
       },
       { headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' } }
     );
-    // ← ZMĚNA 1: přidáno sharing_info — frontend ho potřebuje pro sdílené složky
     const entries = (listRes.data.entries ?? []).map((entry: any) => ({
       tag: entry['.tag'],
       id: entry.id,
@@ -274,16 +300,13 @@ router.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
     const session_id = req.body.session_id || null;
     const upload_batch_id = req.body.upload_batch_id || null;
     const upload_batch_total = req.body.upload_batch_total ? parseInt(req.body.upload_batch_total) : null;
+
     const createResponse = await axios.post(`${API_BASE}/v3/images/`, {
-      image_name: file.originalname, image_type: ext, ai_version: '5.x', enhance: true,
-      enhance_type: rawSettings.enhance_type ?? 'neutral',
-      sky_replacement: rawSettings.sky_replacement ?? true,
-      cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
-      vertical_correction: rawSettings.vertical_correction ?? true,
-      lens_correction: rawSettings.lens_correction ?? true,
-      window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-      upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+      image_name: file.originalname,
+      image_type: ext,
+      ...buildEnhanceParams(rawSettings),
     }, { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
+
     const { image_id, s3PutObjectUrl: upload_url } = createResponse.data;
     const urlParams = new URL(upload_url);
     const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
@@ -425,14 +448,8 @@ router.post('/hdr/order/:orderId/merge', async (req: Request, res: Response) => 
     const { number_of_brackets, settings } = req.body;
     const rawSettings = settings ?? {};
     const body: Record<string, unknown> = {
-      hdr: true, ai_version: '5.x', enhance: true,
-      enhance_type: rawSettings.enhance_type ?? 'neutral',
-      sky_replacement: rawSettings.sky_replacement ?? true,
-      cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
-      vertical_correction: rawSettings.vertical_correction ?? true,
-      lens_correction: rawSettings.lens_correction ?? true,
-      window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-      upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+      hdr: true,
+      ...buildEnhanceParams(rawSettings),
     };
     if (number_of_brackets && number_of_brackets > 1) body.number_of_brackets_per_image = number_of_brackets;
     await axios.post(`${API_BASE}/v3/orders/${orderId}/process`, body,
@@ -464,7 +481,6 @@ function parseDropboxError(err: any): string {
   try {
     const data = err?.response?.data;
     if (!data) return 'no response data';
-    // axios s responseType:'arraybuffer' vraci ArrayBuffer nebo Buffer
     if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8').slice(0, 500);
     if (Buffer.isBuffer(data)) return data.toString('utf8').slice(0, 500);
     if (typeof data === 'string') return data.slice(0, 500);
@@ -475,8 +491,6 @@ function parseDropboxError(err: any): string {
 }
 
 // ── Dropbox download helper s automatickým namespace fallback ─────────────────
-// Pro Team Dropbox účty je potřeba Dropbox-API-Path-Root header.
-// Zkusíme nejdřív bez něj, a při 401 zjistíme namespace a zkusíme znovu.
 async function dropboxDownload(
   access_token: string,
   dropboxArg: string,
@@ -489,8 +503,6 @@ async function dropboxDownload(
       'Dropbox-API-Arg': dropboxArg,
       'Content-Type': '',
     };
-    // S id: referencí namespace header NENÍ potřeba - Dropbox najde soubor přímo podle ID
-    // Namespace header posíláme jen při path referencích
     if (nsId && !dropboxArg.includes('"path":"id:')) {
       headers['Dropbox-API-Path-Root'] = JSON.stringify({ '.tag': 'namespace_id', 'namespace_id': nsId });
     }
@@ -510,12 +522,10 @@ async function dropboxDownload(
   };
 
   try {
-    // Pokus 1: s namespace (pokud ho už máme) nebo bez
     const res = await doRequest(namespaceId);
     return Buffer.from(res.data);
   } catch (err: any) {
     if (err?.response?.status === 401 && !namespaceId) {
-      // 401 bez namespace → Team účet, zjistíme namespace a zkusíme znovu
       const nsId = await getDropboxNamespaceId(access_token);
       if (nsId) {
         try {
@@ -585,24 +595,16 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
 
   (async () => {
     try {
-      // Pro Dropbox OAuth: refresh access token na začátku batche
-      // (online tokeny expirují, offline tokeny lze refreshnout)
       let effectiveAccessToken = access_token;
       if (source === 'dropbox_oauth' && refresh_token) {
         const refreshed = await refreshDropboxToken(refresh_token);
         if (refreshed) {
           effectiveAccessToken = refreshed;
-
-        } else {
-
         }
       }
 
-      // Pro Dropbox Team účty: zjistíme namespace jednou pro celý batch
-      // Používáme Promise aby paralelní workery čekaly na výsledek místo null
       let namespacePromise: Promise<string | null> | null = null;
 
-      // ← ZMĚNA 2: přidáno sharing_info do type signature
       const streamFileToS3 = async (
         file: {
           url?: string;
@@ -621,26 +623,19 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         const contentTypeFromUrl = urlParams.searchParams.get('content-type') ?? correctMime;
 
         if (source === 'dropbox_oauth') {
-          // Vždy používáme file ID - funguje bez ohledu na namespace/mounting
-          // path_lower je relativní k namespace kde je soubor mountnutý a nemusí fungovat
-          // file.id může přijít jako "id:xxx" nebo jen "xxx" - normalizujeme
           const fileId = file.id?.startsWith('id:') ? file.id : `id:${file.id}`;
           const dropboxArg = file.id
             ? JSON.stringify({ path: fileId })
             : JSON.stringify({ path: file.path_lower });
 
-          // Zjistíme user root namespace jednou pro celý batch —
-          // Promise zaručí že všechny paralelní workery dostanou správnou hodnotu
           if (!namespacePromise) {
             namespacePromise = getDropboxNamespaceId(effectiveAccessToken);
           }
           const dropboxNamespaceId = await namespacePromise;
 
-          // S id: referencí namespace nepotřebujeme - ale logujeme pro diagnostiku
           const sharedFolderNs = file.sharing_info?.parent_shared_folder_id ?? null;
           const effectiveNamespace = sharedFolderNs ?? dropboxNamespaceId;
 
-          // ── 1. Stáhneme z Dropboxu (s effective namespace) ───────────────
           let buffer: Buffer;
           try {
             buffer = await dropboxDownload(effectiveAccessToken, dropboxArg, file.name, effectiveNamespace);
@@ -648,7 +643,6 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             throw dropboxErr;
           }
 
-          // ── 2. Uploadujeme na S3 ──────────────────────────────────────────
           try {
             await axios.put(upload_url, buffer, {
               headers: { 'Content-Type': contentTypeFromUrl, 'Content-Length': buffer.length },
@@ -736,14 +730,8 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
         });
 
         const mergeBody: Record<string, unknown> = {
-          hdr: true, ai_version: '5.x', enhance: true,
-          enhance_type: rawSettings.enhance_type ?? 'neutral',
-          sky_replacement: rawSettings.sky_replacement ?? true,
-          cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
-          vertical_correction: rawSettings.vertical_correction ?? true,
-          lens_correction: rawSettings.lens_correction ?? true,
-          window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-          upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+          hdr: true,
+          ...buildEnhanceParams(rawSettings),
         };
         await axios.post(`${API_BASE}/v3/orders/${order_id}/process`, mergeBody,
           { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
@@ -777,14 +765,9 @@ router.post('/cloud-import', async (req: Request, res: Response) => {
             const ext = path.extname(file.name).toLowerCase().replace('.', '');
             const correctMime = getMimeType(file.name, file.mimeType ?? 'application/octet-stream');
             const createRes = await axios.post(`${API_BASE}/v3/images/`, {
-              image_name: file.name, image_type: ext, ai_version: '5.x', enhance: true,
-              enhance_type: rawSettings.enhance_type ?? 'neutral',
-              sky_replacement: rawSettings.sky_replacement ?? true,
-              cloud_type: rawSettings.cloud_type ?? 'LOW_CLOUD',
-              vertical_correction: rawSettings.vertical_correction ?? true,
-              lens_correction: rawSettings.lens_correction ?? true,
-              window_pull_type: rawSettings.window_pull_type ?? 'WINDOWS_WITH_SKIES',
-              upscale: rawSettings.upscale ?? false, privacy: rawSettings.privacy ?? false,
+              image_name: file.name,
+              image_type: ext,
+              ...buildEnhanceParams(rawSettings),
             }, { headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' } });
 
             const { image_id, s3PutObjectUrl: upload_url } = createRes.data;
