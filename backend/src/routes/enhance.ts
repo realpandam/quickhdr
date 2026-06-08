@@ -384,8 +384,14 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
       res.set('Content-Disposition', `attachment; filename="enhanced_${imageId}.jpg"`);
       res.send(Buffer.from(response.data));
     }
-  } catch (error) {
-    console.error('Chyba při stahování výsledku:', error);
+  } catch (error: any) {
+    const status = error?.response?.status;
+    const body = error?.response?.data
+      ? Buffer.isBuffer(error.response.data)
+        ? error.response.data.toString('utf8').slice(0, 500)
+        : JSON.stringify(error.response.data).slice(0, 500)
+      : error?.message;
+    console.error(`[enhanced] imageId=${req.params.imageId} HTTP ${status}: ${body}`);
     res.status(500).json({ error: 'Nepodařilo se stáhnout výsledek' });
   }
 });
