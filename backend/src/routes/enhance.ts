@@ -114,11 +114,10 @@ function buildEnhanceParams(rawSettings: any): Record<string, unknown> {
     lens_correction: rawSettings.lens_correction ?? true,
     window_pull_style: rawSettings.window_pull_style ?? 'WINDOWS_WITH_SKIES',
     upscale: rawSettings.upscale ?? false,
-    privacy: rawSettings.privacy ?? false,
+    auto_privacy: rawSettings.privacy ?? false,  // ← bylo: privacy
     ...(restage && { restage }),
   };
 }
-
 // ── Dropbox: zjisti namespace pro Team účty ───────────────────────────────────
 async function getDropboxNamespaceId(access_token: string): Promise<string | null> {
   try {
