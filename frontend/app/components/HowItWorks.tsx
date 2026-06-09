@@ -3,15 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 
 const steps = [
-  {
+    {
     number: '01',
-    title: 'Nahrajte fotografii',
-    description: 'Přetáhněte fotografii nebo ji vyberte ze svého zařízení. Podporujeme JPG, PNG, RAW a desítky dalších formátů.',
+    title: 'Nastavte parametry',
+    description: 'Zvolte typ vylepšení, výměnu oblohy, korekci vertikály a další nastavení přesně podle vašich potřeb.',
   },
   {
     number: '02',
-    title: 'Nastavte parametry',
-    description: 'Zvolte typ vylepšení, výměnu oblohy, korekci vertikály a další nastavení přesně podle vašich potřeb.',
+    title: 'Nahrajte fotografii',
+    description: 'Přetáhněte fotografii nebo ji vyberte ze svého zařízení. Podporujeme JPG, PNG, RAW a desítky dalších formátů.',
   },
   {
     number: '03',
