@@ -19,6 +19,7 @@ interface Order {
   batch_name: string | null;
   uol_invoice_id: string | null;
   uol_invoice_pdf_url: string | null;
+  wants_invoice: boolean;
 }
 
 interface BatchGroup {
@@ -939,7 +940,7 @@ export default function DashboardPage() {
                               </span>
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const }}>
                                 {(() => {
-                                  const invoiceOrder = group.orders.find(o => o.uol_invoice_id && o.uol_invoice_id !== 'CONFIRMATION_ONLY');
+                                  const invoiceOrder = group.orders.find(o => o.wants_invoice && o.uol_invoice_id);
                                   return invoiceOrder ? (
                                     <button onClick={() => handleDownloadInvoice(invoiceOrder)} style={{ padding: '5px 10px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', transition: 'all 0.15s ease' }}
                                       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent)'; }}

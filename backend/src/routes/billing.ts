@@ -100,12 +100,7 @@ router.get('/invoice/:imageId', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!order.uol_invoice_id) {
-    res.status(404).json({ error: 'Faktura se připravuje, zkuste prosím za chvíli' });
-    return;
-  }
-
-  if (order.uol_invoice_id === 'CONFIRMATION_ONLY') {
+  if (!order.uol_invoice_id || order.uol_invoice_id === 'CONFIRMATION_ONLY') {
     res.status(404).json({ error: 'Pro tuto objednávku nebyla vystavena faktura' });
     return;
   }

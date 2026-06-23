@@ -20,7 +20,7 @@ interface CreatePaymentParams {
 interface GoPayPayment {
   id: number;
   gw_url: string;
-  state: 'CREATED' | 'PAID' | 'AUTHORIZED' | 'PAYMENT_METHOD_CHOSEN' | 'CANCELED' | 'TIMEOUTED' | 'REFUNDED';
+  state: 'CREATED' | 'PAID' | 'AUTHORIZED' | 'PAYMENT_METHOD_CHOSEN' | 'CANCELED' | 'TIMEOUTED' | 'REFUNDED' | 'PARTIALLY_REFUNDED';
   amount: number;
   currency: string;
   order_number: string;

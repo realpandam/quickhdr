@@ -181,6 +181,29 @@ router.get('/notify', async (req: Request, res: Response) => {
                     );
                 }
             }
+        } else if (payment.state === 'REFUNDED' || payment.state === 'PARTIALLY_REFUNDED') {
+            // Platba byla vrácena — zákazník ztratí přístup ke stažení
+            const { data: orders } = await supabase
+                .from('orders')
+                .update({ payment_status: 'refunded' })
+                .eq('gopay_payment_id', paymentId)
+                .eq('payment_status', 'paid')
+                .select('image_id');
+            console.log(`[Payments] Refund ${payment.state} pro payment ${paymentId} — dotčeno ${orders?.length ?? 0} order(ů)`);
+        } else if (payment.state === 'CANCELED' || payment.state === 'TIMEOUTED') {
+            // Pokud byl order mylně označen jako paid (přes AUTHORIZED ve verify), přístupu odeber
+            const { data: revokedOrders } = await supabase
+                .from('orders')
+                .update({ payment_status: 'canceled' })
+                .eq('gopay_payment_id', paymentId)
+                .eq('payment_status', 'paid')
+                .select('image_id');
+            // Ordery, které jsou stále pending, zůstanou pending — zákazník může zkusit znovu
+            if (revokedOrders && revokedOrders.length > 0) {
+                console.log(`[Payments] Payment ${paymentId} ${payment.state} — odebráno paid přes ${revokedOrders.length} order(ů) (AUTHORIZED→TIMEOUTED/CANCELED)`);
+            } else {
+                console.log(`[Payments] Payment ${paymentId} ${payment.state} — order pending, žádná akce`);
+            }
         }
 
         res.status(200).send('OK');
