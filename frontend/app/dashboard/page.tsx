@@ -149,6 +149,9 @@ export default function DashboardPage() {
   const [editingValue, setEditingValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
 
+  const [zippingBatches, setZippingBatches] = useState<Set<string>>(new Set());
+  const [downloadingSelected, setDownloadingSelected] = useState(false);
+
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
     message: string;
@@ -286,6 +289,48 @@ export default function DashboardPage() {
   };
 
   const cancelRename = () => { setEditingBatch(null); setEditingValue(''); };
+
+  const handleDownloadZip = async (imageIds: string[], label: string, batchId?: string) => {
+    if (batchId) setZippingBatches(prev => new Set([...prev, batchId]));
+    else setDownloadingSelected(true);
+    try {
+      const res = await fetch(`${API_URL}/api/enhance/download-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_ids: imageIds }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert((err as { error?: string }).error ?? 'Nepodařilo se stáhnout fotografie');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fasthdr_${label}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { alert('Nepodařilo se stáhnout fotografie'); }
+    finally {
+      if (batchId) setZippingBatches(prev => { const s = new Set(prev); s.delete(batchId); return s; });
+      else setDownloadingSelected(false);
+    }
+  };
+
+  const handleDownloadInvoice = async (order: Order) => {
+    try {
+      const res = await fetch(`${API_URL}/api/billing/invoice/${order.image_id}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert((err as { error?: string }).error ?? 'Nepodařilo se načíst fakturu');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch { console.error('Nepodařilo se načíst fakturu'); }
+  };
 
   const getSelectedOrderObjects = () => orders.filter(o => selectedOrders.has(o.id));
 
@@ -535,9 +580,17 @@ export default function DashboardPage() {
               {selectedPending.length > 0 && ` · ${selectedPending.reduce((s, o) => s + (o.amount_czk ?? 25), 0)} Kč`}
             </span>
             {selectedPaid.length > 0 && (
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                {selectedPaid.length} zaplaceno
-              </span>
+              <button onClick={() => handleDownloadZip(
+                selectedPaid.map(o => o.image_id),
+                `${selectedPaid.length}_fotek`,
+              )} disabled={downloadingSelected} style={{
+                padding: '8px 16px', background: 'transparent', color: 'var(--accent)',
+                border: '1px solid var(--accent)', borderRadius: 7, cursor: 'pointer',
+                fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                opacity: downloadingSelected ? 0.6 : 1, whiteSpace: 'nowrap' as const,
+              }}>
+                {downloadingSelected ? 'Připravuji…' : `⬇ Stáhnout ${selectedPaid.length > 1 ? `${selectedPaid.length} fotek` : 'fotku'}`}
+              </button>
             )}
             {selectedPending.length > 0 && (
               <button onClick={handleBuySelected} disabled={checkoutLoading} style={{
@@ -852,26 +905,6 @@ export default function DashboardPage() {
                                           >
                                             Stáhnout
                                           </a>
-                                          {order.uol_invoice_id && (
-                                            <a
-                                              href={`${API_URL}/api/billing/invoice/${order.image_id}`}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              onClick={async (e) => {
-                                                e.preventDefault();
-                                                try {
-                                                  const res = await fetch(`${API_URL}/api/billing/invoice/${order.image_id}`);
-                                                  const { url } = await res.json();
-                                                  if (url) window.open(url, '_blank');
-                                                } catch { console.error('Nepodařilo se načíst fakturu'); }
-                                              }}
-                                              style={{ textAlign: 'center', padding: '5px 8px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', fontSize: 10, fontWeight: 600, textDecoration: 'none', display: 'block', fontFamily: 'inherit', transition: 'all 0.15s ease' }}
-                                              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
-                                              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-muted)'; }}
-                                            >
-                                              📄 Faktura
-                                            </a>
-                                          )}
                                         </div>
                                       ) : !expired && photoReady ? (
                                         <button
@@ -904,11 +937,38 @@ export default function DashboardPage() {
                               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                                 {group.paidCount} z {group.totalCount} zaplaceno · {group.orders.reduce((s, o) => s + (o.amount_czk || 0), 0)} Kč celkem
                               </span>
-                              {batchExpired && (
-                                <button onClick={() => handleDeleteBatch(group.orders)} style={{ padding: '6px 14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
-                                  🗑 Smazat skupinu
-                                </button>
-                              )}
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const }}>
+                                {(() => {
+                                  const invoiceOrder = group.orders.find(o => o.uol_invoice_id);
+                                  return invoiceOrder ? (
+                                    <button onClick={() => handleDownloadInvoice(invoiceOrder)} style={{ padding: '5px 10px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', transition: 'all 0.15s ease' }}
+                                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent)'; }}
+                                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; }}
+                                    >
+                                      📄 Faktura
+                                    </button>
+                                  ) : null;
+                                })()}
+                                {!batchExpired && group.paidCount > 1 && (
+                                  <button
+                                    onClick={() => {
+                                      const paidIds = group.orders
+                                        .filter(o => o.payment_status === 'paid' && new Date(o.expires_at) > new Date())
+                                        .map(o => o.image_id);
+                                      handleDownloadZip(paidIds, group.name.replace(/[^a-z0-9]/gi, '_').slice(0, 20), group.batch_id);
+                                    }}
+                                    disabled={zippingBatches.has(group.batch_id)}
+                                    style={{ padding: '5px 10px', background: 'transparent', color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit', opacity: zippingBatches.has(group.batch_id) ? 0.6 : 1, whiteSpace: 'nowrap' as const }}
+                                  >
+                                    {zippingBatches.has(group.batch_id) ? 'Připravuji ZIP…' : `⬇ Stáhnout vše (${group.paidCount})`}
+                                  </button>
+                                )}
+                                {batchExpired && (
+                                  <button onClick={() => handleDeleteBatch(group.orders)} style={{ padding: '6px 14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
+                                    🗑 Smazat skupinu
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </>
                         )}

@@ -1,3 +1,4 @@
+import { ZipArchive } from 'archiver';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
 import { Request, Response, Router } from 'express';
@@ -393,6 +394,67 @@ router.get('/enhanced/:imageId', async (req: Request, res: Response) => {
     console.error(`[enhanced] imageId=${req.params.imageId} HTTP ${status}: ${body}`);
     res.status(500).json({ error: 'Nepodařilo se stáhnout výsledek' });
   }
+});
+
+// ── Batch ZIP download ────────────────────────────────────────────────────────
+router.post('/download-zip', async (req: Request, res: Response) => {
+  const { image_ids } = req.body as { image_ids?: unknown };
+
+  if (!Array.isArray(image_ids) || image_ids.length === 0 || image_ids.length > 30) {
+    res.status(400).json({ error: 'Očekáváno 1–30 image_ids' });
+    return;
+  }
+
+  const ids = (image_ids as unknown[]).filter((id): id is string => typeof id === 'string');
+
+  const { data: orders, error } = await supabase
+    .from('orders')
+    .select('image_id, filename, payment_status, expires_at')
+    .in('image_id', ids);
+
+  if (error || !orders) {
+    res.status(500).json({ error: 'Chyba při ověření objednávek' });
+    return;
+  }
+
+  const paidOrders = orders.filter(
+    (o: { payment_status: string; expires_at: string }) =>
+      o.payment_status === 'paid' && new Date(o.expires_at) > new Date()
+  );
+
+  if (paidOrders.length === 0) {
+    res.status(402).json({ error: 'Žádné zaplacené a platné fotografie' });
+    return;
+  }
+
+  const results = await Promise.allSettled(
+    paidOrders.map((order: { image_id: string; filename: string | null }) =>
+      axios.get(`${API_BASE}/v3/images/${order.image_id}/enhanced`, {
+        headers: { 'x-api-key': API_KEY },
+        responseType: 'arraybuffer',
+        params: { preview: 'false', quality: 90 },
+        timeout: 30_000,
+      }).then(r => ({ order, buffer: Buffer.from(r.data as ArrayBuffer) }))
+    )
+  );
+
+  const archive = new ZipArchive({ zlib: { level: 5 } });
+
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="fasthdr_${Date.now()}.zip"`);
+
+  archive.pipe(res);
+
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const { order, buffer } = result.value;
+    const safe = order.filename && !order.filename.match(/^[0-9a-f-]{36}/)
+      ? `enhanced_${order.filename}`
+      : `foto_${order.image_id.slice(0, 8)}.jpg`;
+    archive.append(buffer, { name: safe });
+  }
+
+  await archive.finalize();
 });
 
 // ── HDR: Vytvoř order ─────────────────────────────────────────────────────────
