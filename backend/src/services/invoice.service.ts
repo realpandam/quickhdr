@@ -297,7 +297,23 @@ export async function createInvoiceForOrder(orderId: string): Promise<void> {
     }
   }
 
-  // 4. Idempotence — UOL check
+  // 4. Bez IČO → potvrzení platby místo faktury
+  if (!order.wants_invoice) {
+    // Označ celý batch jako "bez faktury" — cron ho nebude znovu zpracovávat
+    await Promise.all(batchOrders.map(o =>
+      supabase.from('orders').update({
+        uol_invoice_id:      'CONFIRMATION_ONLY',
+        uol_invoice_sent_at: new Date().toISOString(),
+        uol_invoice_error:   null,
+      }).eq('id', o.id)
+    ));
+
+    // Potvrzovací email již odeslal payments.ts ihned po platbě — zde nic neposíláme.
+    console.log(`[Invoice] ✓ Non-IČO order ${orderId} označen jako CONFIRMATION_ONLY`);
+    return;
+  }
+
+  // 5. Idempotence — UOL check
   const existingInvoiceId = await uol.findInvoiceByExternalId(orderId);
   if (existingInvoiceId) {
     await Promise.all(batchOrders.map(o =>

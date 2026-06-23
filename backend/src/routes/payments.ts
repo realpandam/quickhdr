@@ -105,7 +105,8 @@ router.get('/verify/:paymentId', async (req: Request, res: Response) => {
                     primaryOrder.email,
                     primaryOrder.filename,
                     primaryOrder.image_id,
-                    orders.length
+                    orders.length,
+                    Boolean(primaryOrder.wants_invoice),
                 );
             }
 
@@ -175,7 +176,8 @@ router.get('/notify', async (req: Request, res: Response) => {
                         customerEmail,
                         primaryOrder.filename,
                         primaryOrder.image_id,
-                        orders.length
+                        orders.length,
+                        Boolean(primaryOrder.wants_invoice),
                     );
                 }
             }
@@ -196,7 +198,8 @@ async function sendConfirmationEmail(
     email: string,
     filename: string,
     imageId: string,
-    count: number = 1
+    count: number = 1,
+    wantsInvoice: boolean = false
 ) {
     const isMulti  = count > 1;
     const safeName = filename ?? 'bez názvu';
@@ -287,10 +290,13 @@ Platba proběhla úspěšně. ${isMulti ? `${count} fotografií je připraveno k
             <td style="padding:8px 0;font-size:13px;color:#8888A0;">Dostupné po dobu</td>
             <td style="padding:8px 0;font-size:13px;color:#ffffff;font-weight:500;">7 dní</td>
           </tr>
-          <tr>
+          ${wantsInvoice ? `<tr>
             <td style="padding:8px 0;font-size:13px;color:#8888A0;">Faktura</td>
             <td style="padding:8px 0;font-size:13px;color:#AAAABC;">Přijde samostatným emailem za chvíli</td>
-          </tr>
+          </tr>` : `<tr>
+            <td style="padding:8px 0;font-size:13px;color:#8888A0;">Doklad</td>
+            <td style="padding:8px 0;font-size:13px;color:#AAAABC;">Toto potvrzení není daňovým dokladem</td>
+          </tr>`}
           <tr>
             <td style="padding:8px 0;font-size:13px;color:#8888A0;">Podpora</td>
             <td style="padding:8px 0;font-size:13px;">
